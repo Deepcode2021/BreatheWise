@@ -15,9 +15,9 @@ export function WeatherCard({ weather }: WeatherCardProps) {
 
   return (
     <div className="glass-card rounded-2xl p-5 h-full">
-      <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4">
+      <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4">
         Weather Conditions
-      </h3>
+      </h2>
 
       {weatherCode !== null && (
         <p className="text-sm text-slate-200 mb-4">

@@ -171,7 +171,7 @@ function ChallengeCard({
               </span>
               <span className="text-xs text-slate-300">{challenge.duration}</span>
             </div>
-            <h3 className="text-sm font-bold text-white">{challenge.title}</h3>
+            <h2 className="text-sm font-bold text-white">{challenge.title}</h2>
           </div>
         </div>
 
@@ -336,7 +336,7 @@ export default function CommunityPage() {
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Recycle className="w-5 h-5 text-teal-400" />
-            <h3 className="text-sm font-bold text-white">Suggested Neighbourhood Goals</h3>
+            <h2 className="text-sm font-bold text-white">Suggested Neighbourhood Goals</h2>
           </div>
           <span className="text-[11px] text-amber-300 font-medium">Demo community data</span>
         </div>

@@ -466,6 +466,18 @@ export function validateAIResponse(raw: unknown): AIResponse {
   };
 }
 
+/**
+ * Extracts the outermost JSON object substring in O(n) linear time without regex backtracking.
+ */
+export function extractJsonObject(rawText: string): string {
+  const start = rawText.indexOf('{');
+  const end = rawText.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('Model did not return JSON payload');
+  }
+  return rawText.slice(start, end + 1);
+}
+
 export function classifyGeminiError(error: unknown): { status: number; message: string } {
   const errObj = error as { status?: number; code?: string; name?: string; message?: string } | null;
   const msg = (errObj?.message ?? '').toLowerCase();

@@ -208,7 +208,7 @@ function GreenChoiceCard({ choice }: { choice: GreenChoice }) {
                 >
                   {choice.category}
                 </span>
-                <h3 className="text-sm font-bold text-white mt-0.5">{choice.title}</h3>
+                <h2 className="text-sm font-bold text-white mt-0.5">{choice.title}</h2>
               </div>
               {expanded ? (
                 <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />

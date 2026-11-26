@@ -140,7 +140,7 @@ export default function ImpactPage() {
     saveTodayActions(updated);
   };
 
-  const parsedDistance = Math.max(0, parseFloat(distanceKm) || 0);
+  const parsedDistance = Math.max(0, Number.parseFloat(distanceKm) || 0);
   const tripEstimate = calculateTransportCO2Savings({
     distanceKm: parsedDistance,
     baselineVehicle,
@@ -299,7 +299,7 @@ export default function ImpactPage() {
               max={6}
               value={chosenMode === 'carpool' ? chosenOccupancy : baselineOccupancy}
               onChange={(e) => {
-                const n = Math.max(1, parseInt(e.target.value, 10) || 1);
+                const n = Math.max(1, Number.parseInt(e.target.value, 10) || 1);
                 if (chosenMode === 'carpool') setChosenOccupancy(Math.max(2, n));
                 else setBaselineOccupancy(n);
               }}
@@ -332,7 +332,7 @@ export default function ImpactPage() {
       {weeklyData.length > 0 && (
         <div className="glass-card rounded-2xl p-5">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
-            <h3 className="text-sm font-semibold text-slate-200">7-Day Completed Actions</h3>
+            <h2 className="text-sm font-semibold text-slate-200">7-Day Completed Actions</h2>
             <span className="text-xs text-slate-400">Stored locally in your browser</span>
           </div>
 

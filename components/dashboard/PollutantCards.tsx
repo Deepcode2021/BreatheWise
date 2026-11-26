@@ -145,7 +145,7 @@ function PollutantCard({
               <div
                 className="h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${Math.min((avgValue! / parseFloat(meta.benchmark)) * 50, 100)}%`,
+                  width: `${Math.min((avgValue! / Number.parseFloat(meta.benchmark)) * 50, 100)}%`,
                   backgroundColor: sc.text,
                 }}
               />

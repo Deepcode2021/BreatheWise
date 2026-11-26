@@ -70,7 +70,7 @@ export function HourlyChart({ data }: HourlyChartProps) {
   if (chartData.length === 0) {
     return (
       <div className="glass-card rounded-2xl p-5 h-full flex flex-col justify-center items-center text-center">
-        <h3 className="text-sm font-semibold text-slate-200 mb-1">24-Hour Estimated AQI Trend</h3>
+        <h2 className="text-sm font-semibold text-slate-200 mb-1">24-Hour Estimated AQI Trend</h2>
         <p className="text-xs text-slate-400">
           Hourly CPCB AQI trend is unavailable due to incomplete rolling averaging windows.
         </p>
@@ -84,7 +84,7 @@ export function HourlyChart({ data }: HourlyChartProps) {
   return (
     <div className="glass-card rounded-2xl p-5 h-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
-        <h3 className="text-sm font-semibold text-slate-200">24-Hour Estimated Indian AQI Trend</h3>
+        <h2 className="text-sm font-semibold text-slate-200">24-Hour Estimated Indian AQI Trend</h2>
         <span className="text-xs text-slate-400">Rolling model forecast · CPCB methodology</span>
       </div>
       <ResponsiveContainer width="100%" height={200}>

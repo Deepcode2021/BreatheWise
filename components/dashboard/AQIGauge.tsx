@@ -34,9 +34,9 @@ export function AQIGauge({ aqi, availability, loading }: AQIGaugeProps) {
 
   return (
     <div className="glass-card rounded-2xl p-6 flex flex-col items-center justify-center h-full">
-      <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4">
+      <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-4">
         Estimated AQI Gauge
-      </h3>
+      </h2>
 
       {loading && !aqi ? (
         <div className="w-36 h-20 shimmer rounded-full" />

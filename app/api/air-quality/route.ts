@@ -6,8 +6,8 @@ import type { Location } from '@/types';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const lat = parseFloat(searchParams.get('lat') ?? '');
-  const lon = parseFloat(searchParams.get('lon') ?? '');
+  const lat = Number.parseFloat(searchParams.get('lat') ?? '');
+  const lon = Number.parseFloat(searchParams.get('lon') ?? '');
   const name = searchParams.get('name') ?? 'Unknown';
   const country = searchParams.get('country') ?? '';
   const state = searchParams.get('state') ?? undefined;
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  if (isNaN(lat) || isNaN(lon)) {
+  if (Number.isNaN(lat) || Number.isNaN(lon)) {
     return NextResponse.json({ error: 'Invalid coordinates' }, { status: 400 });
   }
 

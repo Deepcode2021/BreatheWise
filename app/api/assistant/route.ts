@@ -12,6 +12,7 @@ import {
   buildContextString,
   classifyGeminiError,
   compactHourlyForecast,
+  extractJsonObject,
   getConfiguredGeminiModel,
   sanitizeContext,
   sanitizeHistory,
@@ -169,12 +170,8 @@ export async function POST(request: NextRequest) {
     }
 
     const rawText = response.text ?? '';
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Model did not return JSON payload');
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
+    const jsonPayload = extractJsonObject(rawText);
+    const parsed = JSON.parse(jsonPayload);
     const validated: AIResponse = validateAIResponse(parsed);
 
     return NextResponse.json({

@@ -4,6 +4,7 @@ import {
   DEFAULT_GEMINI_MODEL,
   buildContextString,
   classifyGeminiError,
+  extractJsonObject,
   getConfiguredGeminiModel,
   sanitizeContext,
   sanitizeHistory,
@@ -117,5 +118,22 @@ describe('Gemini Assistant Helpers & Validation', () => {
     assert.equal(classifyGeminiError({ name: 'AbortError', message: 'aborted' }).status, 504);
     assert.equal(classifyGeminiError({ status: 403, message: 'PERMISSION_DENIED' }).status, 503);
     assert.equal(classifyGeminiError(new Error('fetch failed')).status, 502);
+  });
+
+  it('extracts JSON objects in O(n) linear time without ReDoS backtracking', () => {
+    assert.equal(extractJsonObject('{"summary":"ok"}'), '{"summary":"ok"}');
+    assert.equal(
+      extractJsonObject('```json\n{"summary":"fenced","nested":{"a":1}}\n```'),
+      '{"summary":"fenced","nested":{"a":1}}'
+    );
+    assert.throws(() => extractJsonObject('no braces here'), /JSON payload/);
+    assert.throws(() => extractJsonObject('} reversed {'), /JSON payload/);
+
+    // Pathological ReDoS input (100k open braces without closing brace) must reject immediately in < 50ms
+    const evilInput = '{'.repeat(100_000) + 'malformed';
+    const t0 = performance.now();
+    assert.throws(() => extractJsonObject(evilInput), /JSON payload/);
+    const elapsedMs = performance.now() - t0;
+    assert.ok(elapsedMs < 50, `Expected linear time <50ms, got ${elapsedMs}ms`);
   });
 });

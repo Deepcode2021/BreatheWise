@@ -125,14 +125,14 @@ function RoutineCard({
                 </span>
                 <span className="text-xs text-slate-300">{item.when}</span>
               </div>
-              <h3
+              <h2
                 className={cn(
                   'text-base font-semibold text-white pt-0.5',
                   item.completed && 'line-through text-slate-400'
                 )}
               >
                 {item.action}
-              </h3>
+              </h2>
             </div>
 
             <button
