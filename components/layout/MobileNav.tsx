@@ -30,7 +30,7 @@ export function MobileNav() {
               key={href}
               href={href}
               className={cn(
-                'flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 min-w-0',
+                'flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium min-w-0',
                 active ? 'text-teal-400' : 'text-slate-500 hover:text-slate-300'
               )}
               aria-current={active ? 'page' : undefined}

@@ -429,69 +429,6 @@ export function calculateCPCBAQI(
   });
 }
 
-// Convert Open-Meteo European AQI index (explicitly labeled as European AQI, never CPCB)
-export function openMeteoIndexToInfo(euroIndex: number): AQIInfo {
-  if (euroIndex <= 20)
-    return {
-      value: euroIndex,
-      category: 'Good',
-      scale: 'OpenMeteo_Index',
-      color: '#00C853',
-      bgColor: '#E8F5E9',
-      description: 'European AQI: Good (model estimate)',
-      healthImplication: 'Minimal impact on health.',
-    };
-  if (euroIndex <= 40)
-    return {
-      value: euroIndex,
-      category: 'Satisfactory',
-      scale: 'OpenMeteo_Index',
-      color: '#76FF03',
-      bgColor: '#F9FBE7',
-      description: 'European AQI: Fair (model estimate)',
-      healthImplication: 'Minor discomfort possible in sensitive individuals.',
-    };
-  if (euroIndex <= 60)
-    return {
-      value: euroIndex,
-      category: 'Moderate',
-      scale: 'OpenMeteo_Index',
-      color: '#FFAB00',
-      bgColor: '#FFF8E1',
-      description: 'European AQI: Moderate (model estimate)',
-      healthImplication: 'May cause discomfort for sensitive groups.',
-    };
-  if (euroIndex <= 80)
-    return {
-      value: euroIndex,
-      category: 'Poor',
-      scale: 'OpenMeteo_Index',
-      color: '#FF6D00',
-      bgColor: '#FBE9E7',
-      description: 'European AQI: Poor (model estimate)',
-      healthImplication: 'May cause breathing discomfort for most people.',
-    };
-  if (euroIndex <= 100)
-    return {
-      value: euroIndex,
-      category: 'Very Poor',
-      scale: 'OpenMeteo_Index',
-      color: '#D50000',
-      bgColor: '#FFEBEE',
-      description: 'European AQI: Very Poor (model estimate)',
-      healthImplication: 'May cause respiratory illness on prolonged exposure.',
-    };
-  return {
-    value: euroIndex,
-    category: 'Severe',
-    scale: 'OpenMeteo_Index',
-    color: '#6A0080',
-    bgColor: '#F3E5F5',
-    description: 'European AQI: Extremely Poor (model estimate)',
-    healthImplication: 'Serious health impacts on everyone.',
-  };
-}
-
 export function getAQICategoryColor(category: AQICategory): string {
   const map: Record<AQICategory, string> = {
     Good: '#00C853',

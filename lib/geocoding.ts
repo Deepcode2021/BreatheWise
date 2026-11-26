@@ -26,15 +26,6 @@ export async function geocodeCity(query: string): Promise<Location[]> {
   }));
 }
 
-export async function reverseGeocode(lat: number, lon: number): Promise<Location> {
-  // Open-Meteo doesn't have reverse geocoding; use a simple label
-  return {
-    name: `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`,
-    country: '',
-    coordinates: { latitude: lat, longitude: lon },
-  };
-}
-
 export const POPULAR_CITIES: Location[] = [
   { name: 'Delhi', country: 'India', state: 'Delhi', coordinates: { latitude: 28.6519, longitude: 77.2315 } },
   { name: 'Mumbai', country: 'India', state: 'Maharashtra', coordinates: { latitude: 19.0760, longitude: 72.8777 } },

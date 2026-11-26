@@ -98,7 +98,7 @@ function PollutantCard({
   const sc = status ? statusColors[status] : null;
 
   return (
-    <div className="glass-card rounded-xl p-4 hover:border-slate-500/40 transition-colors duration-200 flex flex-col justify-between">
+    <div className="glass-card rounded-xl p-4 hover:border-slate-500/40 flex flex-col justify-between">
       <div>
         <div className="flex items-start justify-between gap-2 mb-2">
           <div>
@@ -143,9 +143,9 @@ function PollutantCard({
           <div className="mb-3">
             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
-                className="h-full rounded-full transition-all duration-500"
+                className="h-full w-full rounded-full origin-left transition-transform duration-500"
                 style={{
-                  width: `${Math.min((avgValue! / Number.parseFloat(meta.benchmark)) * 50, 100)}%`,
+                  transform: `scaleX(${Math.min((avgValue! / Number.parseFloat(meta.benchmark)) * 0.5, 1)})`,
                   backgroundColor: sc.text,
                 }}
               />

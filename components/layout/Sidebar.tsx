@@ -62,7 +62,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
               href={href}
               onClick={onNavigate}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
+                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium',
                 active
                   ? 'bg-gradient-to-r from-teal-500/20 to-emerald-500/10 text-teal-400 border border-teal-500/20'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'

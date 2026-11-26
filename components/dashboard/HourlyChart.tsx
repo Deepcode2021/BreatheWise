@@ -12,7 +12,20 @@ import {
   ReferenceLine,
 } from 'recharts';
 import type { HourlyDataPoint } from '@/types';
-import { format, parseISO } from 'date-fns';
+
+function formatHourLabel(isoTime: string): string {
+  try {
+    const parsed = new Date(isoTime);
+    if (Number.isNaN(parsed.getTime())) {
+      return isoTime.slice(11, 16) || isoTime;
+    }
+    const hh = String(parsed.getHours()).padStart(2, '0');
+    const mm = String(parsed.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  } catch {
+    return isoTime.slice(11, 16) || isoTime;
+  }
+}
 
 interface HourlyChartProps {
   data: HourlyDataPoint[];
@@ -53,19 +66,11 @@ export function HourlyChart({ data }: HourlyChartProps) {
   const chartData = data
     .filter((d) => d.aqi !== null)
     .slice(0, 24)
-    .map((d) => {
-      let timeLabel = d.time;
-      try {
-        timeLabel = format(parseISO(d.time), 'HH:mm');
-      } catch {
-        timeLabel = d.time.slice(11, 16) || d.time;
-      }
-      return {
-        time: timeLabel,
-        aqi: d.aqi,
-        pm25: d.pm25,
-      };
-    });
+    .map((d) => ({
+      time: formatHourLabel(d.time),
+      aqi: d.aqi,
+      pm25: d.pm25,
+    }));
 
   if (chartData.length === 0) {
     return (

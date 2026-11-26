@@ -18,7 +18,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     <header className="flex items-center gap-3 px-4 py-3 bg-slate-900/50 backdrop-blur-md border-b border-slate-700/30 flex-shrink-0">
       <button
         onClick={onMenuClick}
-        className="md:hidden p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+        className="md:hidden p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800"
         aria-label="Open navigation menu"
       >
         <Menu className="w-5 h-5" />
@@ -84,7 +84,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
         onClick={refresh}
         disabled={loading}
         className={cn(
-          'p-2 rounded-lg text-slate-300 hover:text-teal-400 hover:bg-slate-800 transition-colors',
+          'p-2 rounded-lg text-slate-300 hover:text-teal-400 hover:bg-slate-800',
           loading && 'opacity-50 cursor-not-allowed'
         )}
         aria-label="Refresh air quality data"

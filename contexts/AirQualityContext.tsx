@@ -2,8 +2,13 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { AirQualityData, AirQualityForecast, Location } from '@/types';
-import { POPULAR_CITIES } from '@/lib/geocoding';
-import { getDemoAirQualityData, getDemoForecast } from '@/lib/demoData';
+
+const DEFAULT_LOCATION: Location = {
+  name: 'Delhi',
+  country: 'India',
+  state: 'Delhi',
+  coordinates: { latitude: 28.6519, longitude: 77.2315 },
+};
 
 interface AirQualityContextValue {
   data: AirQualityData | null;
@@ -63,6 +68,7 @@ export function AirQualityProvider({ children }: { children: React.ReactNode }) 
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Failed to fetch air quality:', err);
+      const { getDemoAirQualityData, getDemoForecast } = await import('@/lib/demoData');
       setLocationState(loc);
       setData(getDemoAirQualityData());
       setForecast(getDemoForecast());
@@ -123,7 +129,7 @@ export function AirQualityProvider({ children }: { children: React.ReactNode }) 
 
   // Initialize with saved location or default Delhi
   useEffect(() => {
-    let initialLoc: Location = POPULAR_CITIES[0];
+    let initialLoc: Location = DEFAULT_LOCATION;
     try {
       const saved = localStorage.getItem('breathewise_location');
       if (saved) {

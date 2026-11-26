@@ -3,10 +3,25 @@
 import React from 'react';
 import type { ForecastDay } from '@/types';
 import { getAQICategoryColor } from '@/lib/aqi';
-import { format, parseISO } from 'date-fns';
 
 interface ForecastCardsProps {
   days: ForecastDay[];
+}
+
+const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+});
+
+function formatForecastDate(dateStr: string): string {
+  try {
+    const parsed = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return dateStr;
+    return DATE_FORMATTER.format(parsed);
+  } catch {
+    return dateStr;
+  }
 }
 
 export function ForecastCards({ days }: ForecastCardsProps) {
@@ -15,18 +30,12 @@ export function ForecastCards({ days }: ForecastCardsProps) {
       {days.map((day) => {
         const color = getAQICategoryColor(day.category);
         const headlineAqi = day.avgAqi ?? day.maxAqi;
-        const date = (() => {
-          try {
-            return format(parseISO(day.date), 'EEE, MMM d');
-          } catch {
-            return day.date;
-          }
-        })();
+        const date = formatForecastDate(day.date);
 
         return (
           <div
             key={day.date}
-            className="glass-card rounded-xl p-4 text-center transition-colors duration-200 hover:border-slate-500/40"
+            className="glass-card rounded-xl p-4 text-center hover:border-slate-500/40"
             style={{ borderColor: `${color}25` }}
           >
             <div className="text-xs font-medium text-slate-300 mb-2">{date}</div>
