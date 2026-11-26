@@ -8,6 +8,15 @@ import type {
   UserPreferences,
 } from '@/types';
 
+export interface CleanWindow {
+  startTime: string;
+  endTime: string;
+  label: string;
+  minAqi: number;
+  maxAqi: number;
+  hours: number;
+}
+
 export interface HourlyTrendSummary {
   hasHourlyData: boolean;
   minAqi: number | null;
@@ -18,6 +27,7 @@ export interface HourlyTrendSummary {
   worstHourAqi: number | null;
   hasGoodOrSatisfactoryWindow: boolean;
   cleanWindowRange: string | null;
+  contiguousCleanWindows: CleanWindow[];
   forecastUncertaintyNote: string;
   bucketAverages: {
     morning: number | null;   // 06:00 - 09:59
@@ -27,19 +37,81 @@ export interface HourlyTrendSummary {
   };
 }
 
-function formatHourRange(iso: string): string {
+function formatHourOnly(iso: string): string {
   try {
     const d = new Date(iso);
-    const hr = d.getHours();
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return `${pad(hr)}:00`;
-  } catch {
-    return iso.slice(11, 16) || iso;
+    if (!Number.isNaN(d.getTime())) {
+      const hr = d.getHours().toString().padStart(2, '0');
+      return `${hr}:00`;
+    }
+  } catch {}
+  return iso.slice(11, 16) || iso;
+}
+
+function formatDayHour(iso: string, firstDateStr: string): string {
+  const hrLabel = formatHourOnly(iso);
+  const datePart = iso.slice(0, 10);
+  if (!datePart || datePart === firstDateStr) return hrLabel;
+  return `Tomorrow ${hrLabel}`;
+}
+
+/**
+ * Finds strictly contiguous, chronological windows where hourly estimated AQI <= maxThreshold.
+ * Never merges separate windows across a polluted interval.
+ */
+export function findContiguousCleanWindows(
+  hourlyPoints: HourlyDataPoint[],
+  maxThreshold = 100
+): CleanWindow[] {
+  if (hourlyPoints.length === 0) return [];
+  const firstDateStr = hourlyPoints[0].time.slice(0, 10);
+  const windows: CleanWindow[] = [];
+
+  let active: HourlyDataPoint[] = [];
+
+  const flush = () => {
+    if (active.length === 0) return;
+    const startPt = active[0];
+    const endPt = active[active.length - 1];
+    const aqis = active.map((p) => p.aqi!);
+    const startLabel = formatDayHour(startPt.time, firstDateStr);
+    // Represent end boundary as end hour + 1h (or exact hour label if 1 hour)
+    const endDate = new Date(endPt.time);
+    let endLabel = formatDayHour(endPt.time, firstDateStr);
+    if (!Number.isNaN(endDate.getTime())) {
+      const plusOne = new Date(endDate.getTime() + 3600_000);
+      const pIso = `${plusOne.getFullYear()}-${String(plusOne.getMonth() + 1).padStart(2, '0')}-${String(
+        plusOne.getDate()
+      ).padStart(2, '0')}T${String(plusOne.getHours()).padStart(2, '0')}:00`;
+      endLabel = formatDayHour(pIso, firstDateStr);
+    }
+
+    windows.push({
+      startTime: startPt.time,
+      endTime: endPt.time,
+      label: `${startLabel}–${endLabel}`,
+      minAqi: Math.min(...aqis),
+      maxAqi: Math.max(...aqis),
+      hours: active.length,
+    });
+    active = [];
+  };
+
+  for (const pt of hourlyPoints) {
+    if (pt.aqi !== null && Number.isFinite(pt.aqi) && pt.aqi <= maxThreshold) {
+      active.push(pt);
+    } else {
+      flush();
+    }
   }
+  flush();
+
+  return windows;
 }
 
 export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSummary {
-  const next24 = hourly.slice(0, 24).filter((h) => h.aqi !== null && Number.isFinite(h.aqi));
+  const next24Chrono = hourly.slice(0, 24);
+  const next24 = next24Chrono.filter((h) => h.aqi !== null && Number.isFinite(h.aqi));
 
   if (next24.length === 0) {
     return {
@@ -52,12 +124,14 @@ export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSumm
       worstHourAqi: null,
       hasGoodOrSatisfactoryWindow: false,
       cleanWindowRange: null,
+      contiguousCleanWindows: [],
       forecastUncertaintyNote:
         'Hourly model trend data is unavailable; recommendations reflect general precaution.',
       bucketAverages: { morning: null, afternoon: null, evening: null, night: null },
     };
   }
 
+  const firstDateStr = next24[0].time.slice(0, 10);
   let best = next24[0];
   let worst = next24[0];
   const buckets = {
@@ -82,12 +156,11 @@ export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSumm
   const avg = (arr: number[]) =>
     arr.length > 0 ? Math.round(arr.reduce((s, n) => s + n, 0) / arr.length) : null;
 
-  const cleanHours = next24.filter((h) => h.aqi! <= 100);
-  const cleanWindowRange =
-    cleanHours.length > 0
-      ? cleanHours.length === 1
-        ? `around ${formatHourRange(cleanHours[0].time)}`
-        : `${formatHourRange(cleanHours[0].time)}–${formatHourRange(cleanHours[cleanHours.length - 1].time)}`
+  const contiguousCleanWindows = findContiguousCleanWindows(next24Chrono, 100);
+  // Pick the longest (tie-break: lowest minAqi) contiguous clean window
+  const bestCleanWindow =
+    contiguousCleanWindows.length > 0
+      ? [...contiguousCleanWindows].sort((a, b) => b.hours - a.hours || a.minAqi - b.minAqi)[0]
       : null;
 
   const spread = worst.aqi! - best.aqi!;
@@ -100,12 +173,13 @@ export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSumm
     hasHourlyData: true,
     minAqi: best.aqi!,
     maxAqi: worst.aqi!,
-    bestHourLabel: formatHourRange(best.time),
+    bestHourLabel: formatDayHour(best.time, firstDateStr),
     bestHourAqi: best.aqi!,
-    worstHourLabel: formatHourRange(worst.time),
+    worstHourLabel: formatDayHour(worst.time, firstDateStr),
     worstHourAqi: worst.aqi!,
-    hasGoodOrSatisfactoryWindow: cleanHours.length > 0,
-    cleanWindowRange,
+    hasGoodOrSatisfactoryWindow: contiguousCleanWindows.length > 0,
+    cleanWindowRange: bestCleanWindow ? bestCleanWindow.label : null,
+    contiguousCleanWindows,
     forecastUncertaintyNote,
     bucketAverages: {
       morning: avg(buckets.morning),
@@ -162,7 +236,7 @@ export function generateDynamicDailyPlan(params: {
     when: `06:00–10:00 · ${bucketText(morningBucket)}`,
     why:
       morningBucket !== null && morningBucket > 200
-        ? `Morning hourly model estimates reach ~${morningBucket} AQI (Poor or worse), often aggravated by winter inversions and rush-hour traffic.`
+        ? `Morning hourly model estimates reach ~${morningBucket} AQI (Poor or worse), often aggravated by thermal inversions and rush-hour traffic.`
         : morningBucket !== null && morningBucket > 100
         ? `Morning hourly model estimates are ~${morningBucket} AQI (Moderate); prolonged exertion may affect sensitive groups.`
         : currentAqi === null
@@ -190,7 +264,7 @@ export function generateDynamicDailyPlan(params: {
       : 'Prefer metro/bus or low-traffic side streets; avoid active cycling along heavy traffic if AQI > 100',
     when: `Peak commute hours · ${trend.forecastUncertaintyNote}`,
     why: isPoorOrWorse
-      ? `Current estimated AQI is ${currentAqi ?? 'elevated'} (${category}). Roadside NO₂ and PM2.5 are typically much higher than regional model averages.`
+      ? `Current estimated AQI is ${currentAqi ?? 'elevated'} (${category}). Roadside NO₂ and PM2.5 are typically higher than regional model averages.`
       : isModerate
       ? `At Moderate AQI (${currentAqi}), sensitive commuters and children benefit from minimizing roadside exhaust exposure.`
       : 'Shifting trips from single-occupancy cars reduces both personal traffic exhaust inhalation and community NO₂/PM2.5 emissions.',
@@ -203,7 +277,7 @@ export function generateDynamicDailyPlan(params: {
     completed: false,
   };
 
-  // 3. Outdoor exercise — strictly data-driven from hourly forecast, never inventing clean windows
+  // 3. Outdoor exercise — strictly data-driven from contiguous chronological hourly forecast
   let exerciseAction: string;
   let exerciseWhen: string;
   let exerciseWhy: string;
@@ -230,18 +304,19 @@ export function generateDynamicDailyPlan(params: {
       ? 'Keep outdoor exercise indoors for children, elderly, and respiratory-sensitive members'
       : 'Reduce intensity and duration if exercising outdoors; prefer indoor workouts';
     exerciseWhen = trend.bestHourLabel
-      ? `Lowest model-estimated hour: around ${trend.bestHourLabel} (~${trend.bestHourAqi} AQI), or stay indoors`
+      ? `Lowest model-estimated hour: ${trend.bestHourLabel} (~${trend.bestHourAqi} AQI), or stay indoors`
       : 'Prefer indoor exercise today';
     exerciseWhy = `Moderate AQI (${currentAqi ?? '101–200'}) does not drop into Good/Satisfactory in the 24h model forecast. Official Indian AQI guidance advises reducing prolonged or strenuous outdoor exertion.`;
     exerciseAlternative = 'Swap high-intensity running for a shorter low-exertion walk or indoor workout.';
   } else if (trend.hasGoodOrSatisfactoryWindow && trend.cleanWindowRange) {
-    exerciseAction = hasVulnerable && !isGoodOrSatisfactory
-      ? `Light outdoor activity only during ${trend.cleanWindowRange}; monitor for any discomfort`
-      : `Best model-estimated outdoor window: ${trend.cleanWindowRange}`;
+    exerciseAction =
+      hasVulnerable && !isGoodOrSatisfactory
+        ? `Light outdoor activity only during ${trend.cleanWindowRange}; monitor for any discomfort`
+        : `Best model-estimated outdoor window: ${trend.cleanWindowRange}`;
     exerciseWhen = `${trend.cleanWindowRange} (model est. ≤100 AQI; lowest near ${trend.bestHourLabel ?? 'window'} at ~${trend.bestHourAqi})`;
     exerciseWhy = isGoodOrSatisfactory
       ? `Air quality is ${category} (${currentAqi} est. AQI), generally suitable for normal outdoor activity subject to individual sensitivity.`
-      : `Although current AQI is ${category}, the hourly model indicates a lower-pollution window (${trend.cleanWindowRange}) before levels rise toward ~${trend.worstHourAqi}.`;
+      : `Although current AQI is ${category}, the hourly model indicates a contiguous lower-pollution window (${trend.cleanWindowRange}) before levels rise toward ~${trend.worstHourAqi}.`;
     exerciseAlternative = 'Move indoors immediately if local haze, smoke, or breathing discomfort occurs.';
   } else {
     exerciseAction = 'Normal outdoor activity is generally suitable; listen to your body';
@@ -342,4 +417,3 @@ export function generateDynamicDailyPlan(params: {
 
   return [morningItem, commuteItem, exerciseItem, afternoonItem, eveningItem, nightItem];
 }
-

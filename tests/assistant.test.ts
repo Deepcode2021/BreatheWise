@@ -98,7 +98,16 @@ describe('Gemini Assistant Helpers & Validation', () => {
     assert.equal(valid.riskLevel, 'high');
     assert.deepEqual(valid.recommendedActions, ['Stay indoors']);
     assert.equal(valid.dailyRoutine?.length, 1);
-    assert.ok(valid.disclaimer);
+    assert.ok(valid.dataLimitations);
+
+    const educationalOnly = validateAIResponse({
+      summary: 'PM2.5 are fine particles under 2.5 micrometers; PM10 are coarse particles under 10 micrometers.',
+      airQualityExplanation: 'PM2.5 penetrates deeper into the lungs.',
+      dataLimitations: 'General educational response.',
+    });
+    assert.deepEqual(educationalOnly.indoorSuggestions, []);
+    assert.deepEqual(educationalOnly.sustainableAlternatives, []);
+    assert.equal(educationalOnly.disclaimer, undefined);
   });
 
   it('classifies quota, unavailable, not-found, timeout, auth, and network errors with proper HTTP codes', () => {

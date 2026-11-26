@@ -8,6 +8,7 @@ import {
 import { useAirQuality } from '@/contexts/AirQualityContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { generateDynamicDailyPlan, summarizeHourlyTrend } from '@/lib/dailyPlan';
+import { compactHourlyForecast } from '@/lib/assistant';
 import type { DailyRoutineItem, TimeOfDay } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -226,6 +227,7 @@ export default function DailyPlanPage() {
         pollutants: data?.pollutants,
         instantPollutants: data?.instantPollutants,
         hourlySummary: trendSummary,
+        hourlyForecast: compactHourlyForecast(hourly),
         weather: data?.weather,
         preferences: {
           familyMembers: preferences.familyMembers,
@@ -261,7 +263,7 @@ export default function DailyPlanPage() {
     } finally {
       setLoading(false);
     }
-  }, [data, preferences, trendSummary]);
+  }, [data, hourly, preferences, trendSummary]);
 
   const toggleItem = (timeOfDay: TimeOfDay) => {
     const current = getCompletedSnapshot();

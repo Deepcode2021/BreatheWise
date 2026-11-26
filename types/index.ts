@@ -147,6 +147,7 @@ export interface ChatMessage {
 
 export interface AIResponse {
   summary: string;
+  riskAssessment?: string;
   airQualityExplanation?: string;
   riskLevel?: string;
   recommendedActions?: string[];

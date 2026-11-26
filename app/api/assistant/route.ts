@@ -11,6 +11,7 @@ import {
   MAX_QUESTION_LENGTH,
   buildContextString,
   classifyGeminiError,
+  compactHourlyForecast,
   getConfiguredGeminiModel,
   sanitizeContext,
   sanitizeHistory,
@@ -22,9 +23,8 @@ import type { AIResponse } from '@/types';
 async function resolveAuthoritativeContext(
   clientContext: AssistantContextInput
 ): Promise<AssistantContextInput> {
-  // If valid coordinates are supplied and we are not explicitly in demo mode,
-  // derive authoritative environmental data from Open-Meteo on the server
-  // rather than blindly trusting client-supplied numbers.
+  // Derive authoritative environmental data from Open-Meteo on the server when coordinates are supplied
+  // (unless explicitly marked as a demo/synthetic test scenario).
   const coords = clientContext.location?.coordinates;
   if (!coords || clientContext.isDemo) {
     return clientContext;
@@ -44,6 +44,7 @@ async function resolveAuthoritativeContext(
 
     const { data, forecast } = await Promise.race([serverFetchPromise, timeoutPromise]);
     const hourlySummary = summarizeHourlyTrend(forecast.hourly);
+    const hourlyForecast = compactHourlyForecast(forecast.hourly);
 
     return {
       ...clientContext,
@@ -61,13 +62,13 @@ async function resolveAuthoritativeContext(
       pollutants: { ...data.pollutants },
       instantPollutants: data.instantPollutants ? { ...data.instantPollutants } : undefined,
       hourlySummary: hourlySummary as unknown as Record<string, unknown>,
+      hourlyForecast,
       weather: { ...data.weather },
       timestamp: data.timestamp,
       dataSource: data.sourceLabel,
       isDemo: false,
     };
   } catch {
-    // Fallback cleanly to validated client context while noting server fetch fallback
     return {
       ...clientContext,
       dataSource: clientContext.dataSource
@@ -121,8 +122,8 @@ export async function POST(request: NextRequest) {
   }));
 
   const currentUserPrompt = environmentalContextText
-    ? `Current Environmental & Household Context:\n${environmentalContextText}\n\nUser Question: ${rawQuestion}`
-    : `Current Environmental & Household Context:\nNo environmental data was provided.\n\nUser Question: ${rawQuestion}`;
+    ? `Current Environmental & Household Context:\n${environmentalContextText}\n\nUser Question: ${rawQuestion}\n\nRespond specifically to this question using the supplied context. Omit sections that are not relevant to the question.`
+    : `Current Environmental & Household Context:\nNo environmental data was provided.\n\nUser Question: ${rawQuestion}\n\nRespond specifically to this question and state that live environmental readings were not provided.`;
 
   contents.push({
     role: 'user',
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest) {
           contents,
           config: {
             systemInstruction: BREATHEWISE_SYSTEM_INSTRUCTION,
-            temperature: 0.25,
+            temperature: 0.4,
             maxOutputTokens: 1800,
             responseMimeType: 'application/json',
             responseSchema: AI_RESPONSE_SCHEMA,
@@ -182,18 +183,19 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const { status, message } = classifyGeminiError(error);
-    console.error(`Gemini assistant error (${status}, model=${model}):`, error instanceof Error ? error.message : 'Unknown error');
+    console.error(
+      `Gemini assistant error (${status}, model=${model}):`,
+      error instanceof Error ? error.message : 'Unknown error'
+    );
 
     const fallback: AIResponse = {
       summary: message,
       dataLimitations: 'Live AI analysis could not be completed for this request.',
-      disclaimer: 'Please rely on the dashboard readings and official advisories while the AI service is unavailable.',
+      disclaimer:
+        'Please rely on the dashboard readings and official advisories while the AI service is unavailable.',
     };
 
-    return NextResponse.json(
-      { response: fallback, error: message },
-      { status }
-    );
+    return NextResponse.json({ response: fallback, error: message }, { status });
   } finally {
     clearTimeout(timer);
   }

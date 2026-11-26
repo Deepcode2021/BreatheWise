@@ -1,12 +1,15 @@
 // Helper utilities, schemas, and validation for BreatheWise Gemini AI Assistant
 import { Type } from '@google/genai';
-import type { AIResponse, DailyRoutineItem, TimeOfDay } from '@/types';
+import type { AIResponse, DailyRoutineItem, HourlyDataPoint, TimeOfDay } from '@/types';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const MAX_QUESTION_LENGTH = 1500;
 export const MAX_HISTORY_MESSAGES = 6;
 export const MAX_HISTORY_ITEM_LENGTH = 1000;
 export const GEMINI_TIMEOUT_MS = 25_000;
+
+export const DEFAULT_DATA_SOURCE_DISCLAIMER =
+  'Environmental figures shown use Open-Meteo atmospheric model estimates mapped via Indian CPCB breakpoint methodology and are NOT official CPCB monitoring station readings.';
 
 export const VALID_TIME_OF_DAY: ReadonlySet<TimeOfDay> = new Set([
   'morning',
@@ -27,6 +30,12 @@ export interface AssistantLocationInput {
   };
 }
 
+export interface CompactHourlyForecastPoint {
+  time: string;
+  estAqi: number | null;
+  pm25: number | null;
+}
+
 export interface AssistantContextInput {
   location?: AssistantLocationInput;
   aqi?: {
@@ -40,6 +49,7 @@ export interface AssistantContextInput {
   pollutants?: Record<string, number | null>;
   instantPollutants?: Record<string, number | null>;
   hourlySummary?: Record<string, unknown>;
+  hourlyForecast?: CompactHourlyForecastPoint[];
   weather?: Record<string, number | null>;
   preferences?: {
     familyMembers?: string[];
@@ -60,6 +70,14 @@ export interface AssistantHistoryItem {
 export function getConfiguredGeminiModel(): string {
   const configured = process.env.GEMINI_MODEL?.trim();
   return configured && configured.length > 0 ? configured : DEFAULT_GEMINI_MODEL;
+}
+
+export function compactHourlyForecast(hourly: HourlyDataPoint[]): CompactHourlyForecastPoint[] {
+  return hourly.slice(0, 24).map((h) => ({
+    time: h.time,
+    estAqi: h.aqi,
+    pm25: h.pm25 !== null && Number.isFinite(h.pm25) ? Math.round(h.pm25 * 10) / 10 : null,
+  }));
 }
 
 export function sanitizeHistory(raw: unknown): AssistantHistoryItem[] {
@@ -154,6 +172,23 @@ export function sanitizeContext(raw: unknown): AssistantContextInput {
     out.hourlySummary = src.hourlySummary as Record<string, unknown>;
   }
 
+  if (Array.isArray(src.hourlyForecast)) {
+    const cleanedForecast: CompactHourlyForecastPoint[] = [];
+    for (const pt of src.hourlyForecast.slice(0, 24)) {
+      if (!pt || typeof pt !== 'object') continue;
+      const p = pt as Record<string, unknown>;
+      if (typeof p.time !== 'string') continue;
+      cleanedForecast.push({
+        time: p.time.slice(0, 30),
+        estAqi: typeof p.estAqi === 'number' && Number.isFinite(p.estAqi) ? Math.round(p.estAqi) : null,
+        pm25: typeof p.pm25 === 'number' && Number.isFinite(p.pm25) ? Math.round(p.pm25 * 10) / 10 : null,
+      });
+    }
+    if (cleanedForecast.length > 0) {
+      out.hourlyForecast = cleanedForecast;
+    }
+  }
+
   if (src.preferences && typeof src.preferences === 'object') {
     const p = src.preferences as Record<string, unknown>;
     out.preferences = {
@@ -188,14 +223,14 @@ export function buildContextString(context: AssistantContextInput): string {
 
   if (context.aqi) {
     parts.push(
-      `Estimated Indian AQI: ${context.aqi.value} (${context.aqi.category}) — ${
+      `Current Estimated Indian AQI: ${context.aqi.value} (${context.aqi.category}) — ${
         context.aqi.methodology ?? context.aqi.scale
       }${context.aqi.dominantPollutant ? ` · Dominant pollutant: ${context.aqi.dominantPollutant.toUpperCase()}` : ''}`
     );
   } else if (context.aqiUnavailableReason) {
-    parts.push(`Estimated AQI Status: Unavailable (${context.aqiUnavailableReason})`);
+    parts.push(`Current Estimated AQI Status: Unavailable (${context.aqiUnavailableReason})`);
   } else {
-    parts.push('Estimated AQI Status: Not available in current context.');
+    parts.push('Current Estimated AQI Status: Not available in current context.');
   }
 
   if (context.pollutants) {
@@ -219,7 +254,16 @@ export function buildContextString(context: AssistantContextInput): string {
   }
 
   if (context.hourlySummary) {
-    parts.push(`24h Hourly Forecast Trend Summary: ${JSON.stringify(context.hourlySummary)}`);
+    parts.push(`24h Hourly Forecast Summary: ${JSON.stringify(context.hourlySummary)}`);
+  }
+
+  if (context.hourlyForecast && context.hourlyForecast.length > 0) {
+    const chronoLines = context.hourlyForecast
+      .map((h) => `${h.time.slice(11, 16) || h.time} (date ${h.time.slice(0, 10)}): estAQI=${h.estAqi ?? 'N/A'}, PM2.5=${h.pm25 ?? 'N/A'}`)
+      .join(' | ');
+    parts.push(`Chronological Next-24h Hourly Forecast Points: ${chronoLines}`);
+  } else {
+    parts.push('Chronological Next-24h Hourly Forecast Points: Unavailable.');
   }
 
   if (context.weather) {
@@ -258,30 +302,40 @@ export function buildContextString(context: AssistantContextInput): string {
 
 export const BREATHEWISE_SYSTEM_INSTRUCTION = `You are BreatheWise AI — an environmental air-quality information assistant for families and communities in India.
 
-Your role is to:
-- Explain technical air-quality concepts (such as PM2.5, PM10, NO2, SO2, CO, O3, and Indian CPCB AQI categories) in simple, everyday language.
-- Give practical, actionable recommendations personalized to the user's household members (adults, children, elderly, respiratory precautions), transport mode, and home setup.
-- Explain clearly WHY each action is recommended.
-- Support indoor air-quality improvement and sustainable, lower-emission lifestyle alternatives.
+CORE OBJECTIVE:
+Understand the user's specific question first, then generate a genuinely tailored, concise, accurate response grounded ONLY in the supplied environmental and household context. Never repeat generic boilerplate across unrelated questions.
 
-CRITICAL ACCURACY & SAFETY RULES:
-1. Use ONLY the environmental context supplied in this conversation. NEVER fabricate or invent AQI numbers, pollutant concentrations, weather values, cleaner time windows, or health statistics.
-2. Distinguish clearly between atmospheric model estimates/forecasts ("Estimated Indian AQI — CPCB breakpoint methodology") and official CPCB monitoring station readings. Never call an Open-Meteo model estimate an official CPCB station measurement.
-3. NEVER assume morning or nighttime air is automatically cleaner. Recommend a cleaner outdoor window ONLY if the supplied hourly forecast trend shows a lower-AQI window (e.g., <=100 AQI). If no suitable outdoor window exists, recommend shifting activities indoors.
-4. Follow official Indian CPCB guidance:
-   - Good (0-50) & Satisfactory (51-100): generally normal outdoor activity, subject to individual comfort.
-   - Moderate (101-200): reduce prolonged or strenuous outdoor exertion, especially for children, elderly, and people with respiratory or heart sensitivities.
-   - Poor (201-300), Very Poor (301-400), Severe (401-500): apply progressively stronger precautions, keep vulnerable groups indoors, and move workouts indoors.
-5. When environmental data is missing, incomplete, or marked as demo data, explicitly explain the limitation in "dataLimitations" and avoid pretending to know missing numbers.
-6. NEVER diagnose medical conditions, prescribe treatments, or replace professional medical advice. Include an appropriate non-medical disclaimer in "disclaimer" whenever health or exposure guidance is discussed.
-7. Never make unsupported claims (e.g., do not claim exact percentage reductions in personal health risk, and do not cite unverified purifier efficacy percentages; note purifier performance depends on CADR, room size, filter condition, circulation, and infiltration; never recommend ozone-generating cleaners).
-8. Present any CO2 savings as estimates with transparent assumptions.
-9. If generating dailyRoutine items, each item must use timeOfDay in ["morning", "commute", "outdoor-exercise", "afternoon", "evening", "night"]. For regular chat Q&A, leave dailyRoutine as an empty array [].`;
+QUESTION-ADAPTIVE RESPONSE RULES:
+- Children / Family play / School questions: Center summary, riskAssessment, and recommendedActions on children's outdoor exposure, school commute, and practical precautions for children. Leave sustainableAlternatives empty unless asked.
+- Outdoor exercise / Running / Best time window questions: Compare CURRENT AQI against the CHRONOLOGICAL next-24h hourly forecast points. Recommend ONLY contiguous, chronological time windows explicitly supported by the forecast (never assuming morning is cleanest). If all forecast hours exceed Satisfactory (>100 AQI), explicitly state that no suitable outdoor exercise window exists and recommend indoor alternatives. Leave unrelated sections empty.
+- Indoor air quality / Bedroom / Home questions: Prioritize ventilation timing (using the actual outdoor forecast trend), source control (no incense, smoking, dry sweeping), and HEPA purifier factors (CADR, room size, filter condition, circulation, infiltration). Do not cite unverified percentage reduction claims. Leave unrelated commute advice empty.
+- Pollutant / Technical questions (e.g., "difference between PM2.5 and PM10", "biggest concern"): Directly explain the requested pollutant(s), particle size/sources, health mechanisms in plain language, and cite actual supplied concentrations. For pure educational definitions, omit unrelated action checklists, indoorTips, or sustainableAlternatives unless directly helpful.
+- Transport / Sustainability questions: Focus on practical lower-emission travel choices (metro, bus, carpooling, walking/cycling when air permits) and transparent CO2e estimate assumptions in environmentalImpact.
+
+CONSISTENT STRUCTURE (populate ONLY sections relevant to the user's question, EXCEPT summary and dataLimitations which are always required):
+- summary: Direct 1-3 sentence answer specifically addressing the user's question.
+- riskAssessment: Current estimated AQI value, CPCB category, and dominant pollutant (or state clearly if data is missing/incomplete). Omit for pure general definitions where local risk is not asked.
+- riskLevel: "low" | "moderate" | "high" | "very high" (include when assessing current outdoor/exposure risk).
+- airQualityExplanation: Plain-language explanation of current conditions vs hourly forecast (distinguish current AQI from forecast AQI) OR clear explanation of the pollution concept asked about.
+- recommendedActions: Practical steps directly answering the user's question (empty array [] if purely educational).
+- indoorSuggestions: ONLY populate when relevant to the question (e.g. indoor air, bedroom, or poor outdoor conditions requiring staying indoors). Leave [] otherwise.
+- sustainableAlternatives: ONLY populate when relevant to transport, emissions, or lifestyle choices. Leave [] otherwise.
+- environmentalImpact: ONLY populate when environmental/emission impact is relevant. Leave [] otherwise.
+- dataLimitations: ALWAYS explain that Open-Meteo model estimates using CPCB breakpoint methodology are NOT official CPCB monitoring station readings, and note any missing, incomplete, forecast-unavailable, or demo data limitations.
+- disclaimer: Include a clear non-medical disclaimer whenever providing health, exposure, children, elderly, or respiratory guidance; omit or leave empty for non-health conceptual questions.
+
+SAFETY & DATA INTEGRITY:
+1. NEVER invent AQI numbers, pollutant concentrations, cleaner time windows, or unverified reduction percentages.
+2. NEVER assume morning or nighttime air is cleaner.
+3. Ensure any cited forecast time ranges are strictly chronological and match the supplied forecast data.
+4. NEVER diagnose medical conditions or promise guaranteed health outcomes.
+5. If generating dailyRoutine items (only when explicitly asked for a daily routine/plan), use timeOfDay in ["morning", "commute", "outdoor-exercise", "afternoon", "evening", "night"]. Otherwise return dailyRoutine: [].`;
 
 export const AI_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     summary: { type: Type.STRING },
+    riskAssessment: { type: Type.STRING },
     airQualityExplanation: { type: Type.STRING },
     riskLevel: { type: Type.STRING },
     recommendedActions: {
@@ -320,16 +374,7 @@ export const AI_RESPONSE_SCHEMA = {
     dataLimitations: { type: Type.STRING },
     disclaimer: { type: Type.STRING },
   },
-  required: [
-    'summary',
-    'airQualityExplanation',
-    'riskLevel',
-    'recommendedActions',
-    'indoorSuggestions',
-    'sustainableAlternatives',
-    'dataLimitations',
-    'disclaimer',
-  ],
+  required: ['summary', 'dataLimitations'],
 };
 
 function toStringArray(val: unknown, maxItems = 8): string[] {
@@ -343,6 +388,7 @@ function toStringArray(val: unknown, maxItems = 8): string[] {
 function normalizeRiskLevel(val: unknown): string | undefined {
   if (typeof val !== 'string') return undefined;
   const cleaned = val.trim().toLowerCase();
+  if (!cleaned) return undefined;
   if (cleaned === 'low' || cleaned === 'moderate' || cleaned === 'high' || cleaned === 'very high') {
     return cleaned;
   }
@@ -389,8 +435,22 @@ export function validateAIResponse(raw: unknown): AIResponse {
     throw new Error('Response missing non-empty summary');
   }
 
+  const dataLimitations =
+    typeof obj.dataLimitations === 'string' && obj.dataLimitations.trim()
+      ? obj.dataLimitations.trim()
+      : DEFAULT_DATA_SOURCE_DISCLAIMER;
+
+  const disclaimer =
+    typeof obj.disclaimer === 'string' && obj.disclaimer.trim()
+      ? obj.disclaimer.trim()
+      : undefined;
+
   return {
     summary,
+    riskAssessment:
+      typeof obj.riskAssessment === 'string' && obj.riskAssessment.trim()
+        ? obj.riskAssessment.trim()
+        : undefined,
     airQualityExplanation:
       typeof obj.airQualityExplanation === 'string' && obj.airQualityExplanation.trim()
         ? obj.airQualityExplanation.trim()
@@ -401,14 +461,8 @@ export function validateAIResponse(raw: unknown): AIResponse {
     indoorSuggestions: toStringArray(obj.indoorSuggestions),
     sustainableAlternatives: toStringArray(obj.sustainableAlternatives),
     environmentalImpact: toStringArray(obj.environmentalImpact),
-    dataLimitations:
-      typeof obj.dataLimitations === 'string' && obj.dataLimitations.trim()
-        ? obj.dataLimitations.trim()
-        : undefined,
-    disclaimer:
-      typeof obj.disclaimer === 'string' && obj.disclaimer.trim()
-        ? obj.disclaimer.trim()
-        : 'This guidance is informational only and does not replace professional medical advice.',
+    dataLimitations,
+    disclaimer,
   };
 }
 

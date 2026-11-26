@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateDynamicDailyPlan, summarizeHourlyTrend } from '@/lib/dailyPlan';
+import { findContiguousCleanWindows, generateDynamicDailyPlan, summarizeHourlyTrend } from '@/lib/dailyPlan';
 import { ACTION_TEMPLATES, calculateTransportCO2Savings } from '@/lib/actions';
 import { getCPCBCategory } from '@/lib/aqi';
 import type { HourlyDataPoint, UserPreferences } from '@/types';
@@ -79,6 +79,22 @@ describe('Dynamic Daily Plan Logic', () => {
     });
     const exercise = plan.find((i) => i.timeOfDay === 'outdoor-exercise')!;
     assert.ok(exercise.action.includes('00:00'));
+  });
+
+  it('finds strictly contiguous chronological clean windows without merging across polluted hours', () => {
+    // Clean 08:00-09:00, polluted 10:00-14:00 (220), clean 15:00-17:00
+    const hourly = make24h((hr) => {
+      if (hr === 8 || hr === 9) return 80;
+      if (hr >= 15 && hr <= 17) return 75;
+      return 220;
+    });
+    const windows = findContiguousCleanWindows(hourly, 100);
+    assert.equal(windows.length, 2);
+    assert.equal(windows[0].label, '08:00–10:00');
+    assert.equal(windows[1].label, '15:00–18:00');
+
+    const trend = summarizeHourlyTrend(hourly);
+    assert.equal(trend.cleanWindowRange, '15:00–18:00');
   });
 });
 
