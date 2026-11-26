@@ -166,7 +166,7 @@ From [`package.json`](package.json):
 - **Core**: `next` (`16.4.6`, App Router + Turbopack), `react` (`19.3.0`), `react-dom` (`19.3.0`), `typescript` (`^5`)
 - **Styling**: `tailwindcss` (`4.3.3`), `@tailwindcss/turbopack` (`4.3.3`), `clsx`, `tailwind-merge`, `class-variance-authority`
 - **AI**: `@google/genai` (`^3.6.1`)
-- **Charts & UI**: `recharts` (`^3.11.1`), `lucide-react` (`^1.81.0`), `date-fns` (`^4.4.0`), `framer-motion` (`^14.14.0`), `@radix-ui/*` primitives
+- **Charts & UI**: `recharts` (`^3.11.1`), `lucide-react` (`^1.81.0`), `date-fns` (`^4.4.0`)
 - **Linting**: `eslint` (`^9`), `eslint-config-next` (`16.4.6`)
 
 ---
@@ -221,7 +221,8 @@ BreatheWise/
 │   └── validationAndSecurity.test.ts # Input validation, rate limiting, utils & ReDoS tests
 ├── types/index.ts                  # Shared TypeScript interfaces
 ├── .env.example                    # Environment variable placeholders
-├── next.config.ts                  # Security headers, inlineCss, optimizePackageImports & Turbopack rules
+├── proxy.ts                        # Per-request cryptographic CSP nonce & hardened CSP headers
+├── next.config.ts                  # API/static security headers, inlineCss, optimizePackageImports & Turbopack rules
 ├── vercel.json                     # Vercel build/framework settings
 ├── API_SETUP.md                    # Gemini & optional CPCB/OpenAQ setup guide
 ├── TESTING.md                      # Manual QA & calculation test checklist
@@ -266,6 +267,7 @@ npm run start       # Start production server
 npm run lint        # Run ESLint (eslint-config-next)
 npm run type-check  # Run TypeScript check (tsc --noEmit)
 npm test            # Run native Node.js unit tests (tests/*.test.ts)
+npm run test:coverage # Run Node.js test suite with @/ alias resolution & line/branch coverage
 ```
 
 For full verification results, see [`GEMINI_INTEGRATION_REPORT.md`](./GEMINI_INTEGRATION_REPORT.md) and [`FINAL_QA_REPORT.md`](./FINAL_QA_REPORT.md).

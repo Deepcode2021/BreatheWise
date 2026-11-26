@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { connection } from 'next/server';
 import './globals.css';
 import { AppShell } from '@/components/layout/AppShell';
 
@@ -24,7 +25,10 @@ export const viewport: Viewport = {
   themeColor: '#0f172a',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Opt into dynamic SSR per request so proxy.ts CSP nonces are bound to scripts and inlined styles.
+  await connection();
+
   return (
     <html lang="en">
       <body className="bg-slate-950 text-slate-100 antialiased" suppressHydrationWarning>
@@ -33,4 +37,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

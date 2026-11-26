@@ -1,24 +1,21 @@
 import type { NextConfig } from 'next';
 
-const isDev = process.env.NODE_ENV === 'development';
-
-const cspDirectives = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' blob: data:",
-  "font-src 'self'",
-  "connect-src 'self'",
+const apiCspDirectives = [
+  "default-src 'none'",
+  "script-src 'none'",
+  "style-src 'none'",
+  "img-src 'none'",
+  "connect-src 'none'",
   "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
+  "base-uri 'none'",
+  "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
 
 const nextConfig: NextConfig = {
   experimental: {
     inlineCss: true,
-    optimizePackageImports: ['lucide-react', 'recharts', 'date-fns', 'framer-motion'],
+    optimizePackageImports: ['lucide-react', 'recharts', 'date-fns'],
   },
   turbopack: {
     rules: {
@@ -36,10 +33,6 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: cspDirectives,
-          },
           {
             key: 'X-Frame-Options',
             value: 'DENY',
@@ -59,6 +52,15 @@ const nextConfig: NextConfig = {
           {
             key: 'Cross-Origin-Opener-Policy',
             value: 'same-origin',
+          },
+        ],
+      },
+      {
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: apiCspDirectives,
           },
         ],
       },
