@@ -1,26 +1,5 @@
 @import "tailwindcss";
 
-:root {
-  --color-bg-primary: #0f172a;
-  --color-bg-secondary: #1e293b;
-  --color-bg-card: #1e293b;
-  --color-bg-glass: rgba(30, 41, 59, 0.6);
-  --color-teal: #14b8a6;
-  --color-teal-light: #5eead4;
-  --color-teal-dark: #0d9488;
-  --color-mint: #34d399;
-  --color-text-primary: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-border: rgba(100, 116, 139, 0.2);
-  --color-aqi-good: #00C853;
-  --color-aqi-satisfactory: #76FF03;
-  --color-aqi-moderate: #FFAB00;
-  --color-aqi-poor: #FF6D00;
-  --color-aqi-very-poor: #D50000;
-  --color-aqi-severe: #6A0080;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -30,9 +9,9 @@ html {
 }
 
 body {
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-inter, system-ui, sans-serif);
+  background-color: #0f172a;
+  color: #f1f5f9;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   min-height: 100vh;
 }
 
@@ -103,35 +82,9 @@ body {
   animation: shimmer 1.5s infinite;
 }
 
-/* Pulse animation for live indicator */
-@keyframes live-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-.live-indicator {
-  animation: live-pulse 2s ease-in-out infinite;
-}
-
-/* Smooth transitions */
-.transition-smooth {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 /* Focus ring */
 *:focus-visible {
   outline: 2px solid #14b8a6;
   outline-offset: 2px;
   border-radius: 4px;
 }
-
-/* Mobile nav */
-@media (max-width: 768px) {
-  .sidebar-mobile {
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-  }
-  .sidebar-mobile.open {
-    transform: translateX(0);
-  }
-}
-
