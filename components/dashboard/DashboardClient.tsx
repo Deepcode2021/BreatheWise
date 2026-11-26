@@ -54,7 +54,11 @@ export function DashboardClient() {
     <>
       {/* Error/Warning Banner */}
       {error && (
-        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-sm">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-sm"
+        >
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-300" />
           <span>{error}</span>
         </div>
@@ -62,7 +66,11 @@ export function DashboardClient() {
 
       {/* Demo Banner */}
       {data?.isDemo && (
-        <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/25 text-blue-200 text-sm">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/25 text-blue-200 text-sm"
+        >
           <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-300" />
           <div>
             <span className="font-semibold">Demo Mode Active</span> — The values shown are sample data for demonstration purposes only.

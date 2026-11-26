@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useMemo, useCallback, useSyncExternalStore, useRef, useEffect } from 'react';
 import {
   Sun, Coffee, Bus, Dumbbell, ShoppingBag, BedDouble,
   CheckCircle2, Circle, Loader2, RefreshCw, Calendar, Info, AlertTriangle
@@ -138,6 +138,7 @@ function RoutineCard({
             <button
               onClick={() => onToggle(item.timeOfDay)}
               className="flex-shrink-0 mt-0.5 transition-colors"
+              aria-pressed={Boolean(item.completed)}
               aria-label={item.completed ? 'Mark as incomplete' : 'Mark as complete'}
             >
               {item.completed ? (
@@ -173,11 +174,18 @@ export default function DailyPlanPage() {
   const [aiRoutine, setAiRoutine] = useState<DailyRoutineItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const completedIds = useSyncExternalStore(
     subscribePlan,
     getCompletedSnapshot,
     getCompletedServerSnapshot
   );
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const hourly = useMemo(() => forecast?.hourly ?? [], [forecast?.hourly]);
   const trendSummary = useMemo(() => summarizeHourlyTrend(hourly), [hourly]);
@@ -202,6 +210,10 @@ export default function DailyPlanPage() {
   }, [baseRoutine, completedIds]);
 
   const generatePlanWithAI = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setAiError(null);
     try {
@@ -244,6 +256,7 @@ export default function DailyPlanPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, context }),
+        signal: controller.signal,
       });
 
       const json = await res.json();
@@ -258,6 +271,7 @@ export default function DailyPlanPage() {
         throw new Error('AI response did not include a full dailyRoutine list; showing dynamic data-driven plan.');
       }
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       setAiError(err instanceof Error ? err.message : 'Could not reach AI service; using dynamic hourly-trend plan.');
       setAiRoutine(null);
     } finally {
@@ -265,13 +279,13 @@ export default function DailyPlanPage() {
     }
   }, [data, hourly, preferences, trendSummary]);
 
-  const toggleItem = (timeOfDay: TimeOfDay) => {
+  const toggleItem = useCallback((timeOfDay: TimeOfDay) => {
     const current = getCompletedSnapshot();
     const next = current.includes(timeOfDay)
       ? current.filter((id) => id !== timeOfDay)
       : [...current, timeOfDay];
     saveCompletedList(next);
-  };
+  }, []);
 
   const completed = routine.filter((r) => r.completed).length;
 
@@ -307,7 +321,11 @@ export default function DailyPlanPage() {
       </div>
 
       {aiError && (
-        <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-200">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-200"
+        >
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-300" />
           <span>{aiError}</span>
         </div>
@@ -315,15 +333,15 @@ export default function DailyPlanPage() {
 
       {/* Progress */}
       {routine.length > 0 && (
-        <div className="glass-card rounded-2xl p-4">
+        <div className="glass-card rounded-2xl p-4" role="status" aria-live="polite">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-slate-200">Today&apos;s Progress</span>
             <span className="text-sm font-semibold text-teal-300">{completed}/{routine.length} completed</span>
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-teal-500 to-emerald-500 rounded-full transition-all duration-500"
-              style={{ width: `${(completed / routine.length) * 100}%` }}
+              className="h-full w-full bg-gradient-to-r from-teal-500 to-emerald-500 rounded-full origin-left transition-transform duration-500"
+              style={{ transform: `scaleX(${completed / routine.length})` }}
             />
           </div>
         </div>
@@ -332,7 +350,7 @@ export default function DailyPlanPage() {
       {/* Routine Cards */}
       <div className="space-y-4">
         {loading && (
-          <div className="flex flex-col items-center justify-center py-16 gap-4">
+          <div role="status" aria-live="polite" className="flex flex-col items-center justify-center py-16 gap-4">
             <Loader2 className="w-8 h-8 text-teal-400 animate-spin" />
             <p className="text-slate-300 text-sm">Generating personalized plan with Gemini AI...</p>
           </div>

@@ -1,18 +1,34 @@
 'use client';
 
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useState, useSyncExternalStore, useMemo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { BarChart3, Flame, CheckCircle2, Circle, Leaf, TrendingUp, Calculator, Plus, Trash2 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { DailyAction } from '@/types';
 import {
   ACTION_TEMPLATES,
   BASELINE_VEHICLE_EF,
   CHOSEN_MODE_EF,
+  buildWeeklyImpactData,
+  calculateActionStreak,
   calculateTransportCO2Savings,
+  computeCategoryProgress,
   type BaselineVehicleType,
   type ChosenTransportMode,
 } from '@/lib/actions';
 import { generateId, cn } from '@/lib/utils';
+
+const WeeklyImpactChart = dynamic(
+  () => import('@/components/impact/WeeklyImpactChart').then((mod) => mod.WeeklyImpactChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="glass-card rounded-2xl p-5" aria-busy="true" aria-label="Loading 7-day chart">
+        <div className="h-5 w-44 rounded bg-slate-800 shimmer mb-4" />
+        <div className="h-[170px] w-full rounded-xl bg-slate-800/50 shimmer" />
+      </div>
+    ),
+  }
+);
 
 const TRACKER_KEY = 'breathewise_tracker_actions';
 const trackerListeners = new Set<() => void>();
@@ -59,8 +75,8 @@ function getAllActionsSnapshot(): DailyAction[] {
     const raw = localStorage.getItem(TRACKER_KEY);
     if (raw !== cachedRawTracker) {
       cachedRawTracker = raw;
-      const parsed = raw ? (JSON.parse(raw) as DailyAction[]) : EMPTY_ALL;
-      cachedAllActions = Array.isArray(parsed) ? parsed : EMPTY_ALL;
+      const parsed: unknown = raw ? JSON.parse(raw) : EMPTY_ALL;
+      cachedAllActions = Array.isArray(parsed) ? (parsed as DailyAction[]) : EMPTY_ALL;
     }
     return cachedAllActions;
   } catch {
@@ -116,40 +132,53 @@ export default function ImpactPage() {
   const [chosenOccupancy, setChosenOccupancy] = useState<number>(2);
 
   const today = getTodayDateStr();
-  const storedToday = allActions.filter((a) => a.date === today);
-  const actions = storedToday.length > 0 ? storedToday : buildDefaultTodayActions();
+  const actions = useMemo(() => {
+    const storedToday = allActions.filter((a) => a.date === today);
+    return storedToday.length > 0 ? storedToday : buildDefaultTodayActions();
+  }, [allActions, today]);
 
-  const weeklyData = (() => {
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      const dayActions = allActions.filter((a) => a.date === dateStr && a.completed);
-      days.push({
-        day: d.toLocaleDateString('en-IN', { weekday: 'short' }),
-        actions: dayActions.length,
-        co2: Math.round(dayActions.reduce((s, a) => s + a.co2Saved, 0) * 10) / 10,
-      });
-    }
-    return days;
-  })();
+  const weeklyData = useMemo(() => buildWeeklyImpactData(allActions, 7), [allActions]);
+  const weeklyTotalActions = useMemo(
+    () => weeklyData.reduce((sum, d) => sum + d.actions, 0),
+    [weeklyData]
+  );
 
-  const toggleAction = (id: string) => {
-    const updated = actions.map((a) => (a.id === id ? { ...a, completed: !a.completed } : a));
-    saveTodayActions(updated);
-  };
+  const streak = useMemo(() => calculateActionStreak(allActions, 30), [allActions]);
+  const completedCount = useMemo(() => actions.filter((a) => a.completed).length, [actions]);
+  const totalCo2 = useMemo(
+    () =>
+      Math.round(
+        actions
+          .filter((a) => a.completed)
+          .reduce((sum, a) => sum + a.co2Saved, 0) * 10
+      ) / 10,
+    [actions]
+  );
+  const byCategory = useMemo(() => computeCategoryProgress(actions), [actions]);
+  const templateActionNames = useMemo(() => new Set(ACTION_TEMPLATES.map((t) => t.action)), []);
 
   const parsedDistance = Math.max(0, Number.parseFloat(distanceKm) || 0);
-  const tripEstimate = calculateTransportCO2Savings({
-    distanceKm: parsedDistance,
-    baselineVehicle,
-    baselineOccupancy,
-    chosenMode,
-    chosenOccupancy,
-  });
+  const tripEstimate = useMemo(
+    () =>
+      calculateTransportCO2Savings({
+        distanceKm: parsedDistance,
+        baselineVehicle,
+        baselineOccupancy,
+        chosenMode,
+        chosenOccupancy,
+      }),
+    [parsedDistance, baselineVehicle, baselineOccupancy, chosenMode, chosenOccupancy]
+  );
 
-  const logCustomTrip = () => {
+  const toggleAction = useCallback(
+    (id: string) => {
+      const updated = actions.map((a) => (a.id === id ? { ...a, completed: !a.completed } : a));
+      saveTodayActions(updated);
+    },
+    [actions]
+  );
+
+  const logCustomTrip = useCallback(() => {
     if (parsedDistance <= 0) return;
     const modeLabel = CHOSEN_MODE_EF[chosenMode].label;
     const baseLabel = BASELINE_VEHICLE_EF[baselineVehicle].label;
@@ -166,36 +195,14 @@ export default function ImpactPage() {
       date: today,
     };
     saveTodayActions([customAction, ...actions]);
-  };
+  }, [parsedDistance, chosenMode, baselineVehicle, tripEstimate, today, actions]);
 
-  const removeCustomAction = (id: string) => {
-    saveTodayActions(actions.filter((a) => a.id !== id));
-  };
-
-  const completed = actions.filter((a) => a.completed);
-  const totalCo2 = Math.round(completed.reduce((s, a) => s + a.co2Saved, 0) * 10) / 10;
-  const weeklyTotalActions = weeklyData.reduce((s, d) => s + d.actions, 0);
-
-  const byCategory = actions.reduce((acc, a) => {
-    if (!acc[a.category]) acc[a.category] = { total: 0, completed: 0 };
-    acc[a.category].total++;
-    if (a.completed) acc[a.category].completed++;
-    return acc;
-  }, {} as Record<string, { total: number; completed: number }>);
-
-  const streak = (() => {
-    let s = 0;
-    for (let i = 0; i < 30; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
-      if (allActions.some((a) => a.date === dateStr && a.completed)) s++;
-      else if (i > 0) break;
-    }
-    return s;
-  })();
-
-  const templateActionNames = new Set(ACTION_TEMPLATES.map((t) => t.action));
+  const removeCustomAction = useCallback(
+    (id: string) => {
+      saveTodayActions(actions.filter((a) => a.id !== id));
+    },
+    [actions]
+  );
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">
@@ -212,7 +219,7 @@ export default function ImpactPage() {
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Actions Today', value: `${completed.length}/${actions.length}`, icon: CheckCircle2, color: '#14b8a6' },
+          { label: 'Actions Today', value: `${completedCount}/${actions.length}`, icon: CheckCircle2, color: '#14b8a6' },
           { label: 'Est. CO₂e Today', value: `~${totalCo2.toFixed(1)} kg`, icon: Leaf, color: '#34d399', note: 'modeled estimate' },
           { label: 'Day Streak', value: `${streak} day${streak !== 1 ? 's' : ''}`, icon: Flame, color: '#f59e0b' },
           { label: '7-Day Total', value: `${weeklyTotalActions} actions`, icon: TrendingUp, color: '#a78bfa' },
@@ -309,7 +316,7 @@ export default function ImpactPage() {
         </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-700/40">
-          <div className="space-y-1 text-xs">
+          <div className="space-y-1 text-xs" role="status" aria-live="polite">
             <div className="text-slate-200 font-medium">
               Estimated savings:{' '}
               <span className="text-teal-300 font-bold text-sm">~{tripEstimate.co2SavedKg.toFixed(1)} kg CO₂e</span>{' '}
@@ -320,7 +327,7 @@ export default function ImpactPage() {
           <button
             onClick={logCustomTrip}
             disabled={parsedDistance <= 0}
-            className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-teal-500 text-white text-xs font-semibold hover:bg-teal-400 disabled:opacity-40 transition-colors flex-shrink-0"
+            className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-teal-500 text-white text-xs font-semibold hover:bg-teal-400 disabled:opacity-40 flex-shrink-0"
           >
             <Plus className="w-4 h-4" />
             Log Trip
@@ -330,49 +337,7 @@ export default function ImpactPage() {
 
       {/* Weekly Chart */}
       {weeklyData.length > 0 && (
-        <div className="glass-card rounded-2xl p-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-4">
-            <h2 className="text-sm font-semibold text-slate-200">7-Day Completed Actions</h2>
-            <span className="text-xs text-slate-400">Stored locally in your browser</span>
-          </div>
-
-          {weeklyTotalActions === 0 && (
-            <div className="mb-4 p-3 rounded-xl bg-slate-800/60 border border-slate-700/40 text-xs text-slate-300">
-              No actions completed in the last 7 days yet. Check off an action below or log a trip above to see your daily bars grow.
-            </div>
-          )}
-
-          <ResponsiveContainer width="100%" height={170}>
-            <BarChart data={weeklyData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" />
-              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} tickLine={false} />
-              <YAxis
-                allowDecimals={false}
-                domain={[0, (dataMax: number) => Math.max(dataMax, 4)]}
-                tick={{ fontSize: 11, fill: '#94a3b8' }}
-                tickLine={false}
-              />
-              <Tooltip
-                cursor={{ fill: 'rgba(20, 184, 166, 0.12)' }}
-                contentStyle={{
-                  background: '#0f172a',
-                  border: '1px solid rgba(100,116,139,0.45)',
-                  borderRadius: '12px',
-                  fontSize: '12px',
-                  color: '#f1f5f9',
-                }}
-                labelStyle={{ color: '#cbd5e1', fontWeight: 600 }}
-              />
-              <Bar
-                dataKey="actions"
-                fill="#14b8a6"
-                radius={[4, 4, 0, 0]}
-                minPointSize={2}
-                name="Completed Actions"
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <WeeklyImpactChart weeklyData={weeklyData} weeklyTotalActions={weeklyTotalActions} />
       )}
 
       {/* Disclaimer */}
@@ -392,9 +357,9 @@ export default function ImpactPage() {
               </div>
               <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-500"
+                  className="h-full w-full rounded-full origin-left transition-transform duration-500"
                   style={{
-                    width: `${total > 0 ? (comp / total) * 100 : 0}%`,
+                    transform: `scaleX(${total > 0 ? comp / total : 0})`,
                     backgroundColor: CATEGORY_COLORS[cat] ?? '#14b8a6',
                   }}
                 />
@@ -416,19 +381,20 @@ export default function ImpactPage() {
               <div
                 key={action.id}
                 className={cn(
-                  'flex items-start gap-3 p-4 glass-card rounded-xl transition-colors duration-200',
+                  'flex items-start gap-3 p-4 glass-card rounded-xl',
                   action.completed && 'border-teal-500/30'
                 )}
               >
                 <button
                   onClick={() => toggleAction(action.id)}
-                  className="mt-0.5 flex-shrink-0 transition-colors"
+                  className="mt-0.5 flex-shrink-0"
+                  aria-pressed={action.completed}
                   aria-label={action.completed ? 'Mark incomplete' : 'Mark complete'}
                 >
                   {action.completed ? (
                     <CheckCircle2 className="w-5 h-5 text-teal-400" />
                   ) : (
-                    <Circle className="w-5 h-5 text-slate-500 hover:text-teal-400 transition-colors" />
+                    <Circle className="w-5 h-5 text-slate-500 hover:text-teal-400" />
                   )}
                 </button>
 

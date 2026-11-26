@@ -86,16 +86,19 @@ function PollutantCard({
   subIndex,
 }: PollutantCardProps) {
   // Only compare against the 24h/8h CPCB NAAQS benchmark when a sufficient 24h/8h average exists
-  const canCompareBenchmark = avgValue !== null && (isSufficient ?? true);
-  const displayValue = canCompareBenchmark ? avgValue : instantValue;
+  const validAvg =
+    avgValue !== null && Number.isFinite(avgValue) && (isSufficient ?? true) ? avgValue : null;
+  const displayValue = validAvg !== null ? validAvg : instantValue;
 
-  const status = canCompareBenchmark ? getPollutantStatus(meta.key, avgValue!) : null;
+  const status = validAvg !== null ? getPollutantStatus(meta.key, validAvg) : null;
   const statusColors = {
     below_benchmark: { text: '#00C853', bg: '#00C85315', label: 'Below CPCB Std' },
     moderate: { text: '#FFAB00', bg: '#FFAB0015', label: 'Satisfactory' },
     above_benchmark: { text: '#FF6D00', bg: '#FF6D0015', label: 'Above CPCB Std' },
   };
   const sc = status ? statusColors[status] : null;
+  const benchmarkScale =
+    validAvg !== null ? Math.min((validAvg / Number.parseFloat(meta.benchmark)) * 0.5, 1) : 0;
 
   return (
     <div className="glass-card rounded-xl p-4 hover:border-slate-500/40 flex flex-col justify-between">
@@ -127,7 +130,7 @@ function PollutantCard({
         {/* Averaging context */}
         <div className="text-[11px] text-slate-300 mb-2.5 flex flex-wrap items-center justify-between gap-1">
           <span>
-            {canCompareBenchmark
+            {validAvg !== null
               ? `${meta.averagingPeriod} (${validHours ?? windowHours}/${windowHours}h)`
               : displayValue !== null
               ? `Current hour est. (${validHours ?? 0}/${requiredHours ?? windowHours}h min)`
@@ -139,13 +142,13 @@ function PollutantCard({
         </div>
 
         {/* Progress bar — only shown for like-for-like averaged benchmark comparisons */}
-        {canCompareBenchmark && sc && (
+        {validAvg !== null && sc && (
           <div className="mb-3">
             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full w-full rounded-full origin-left transition-transform duration-500"
                 style={{
-                  transform: `scaleX(${Math.min((avgValue! / Number.parseFloat(meta.benchmark)) * 0.5, 1)})`,
+                  transform: `scaleX(${benchmarkScale})`,
                   backgroundColor: sc.text,
                 }}
               />
@@ -159,7 +162,7 @@ function PollutantCard({
         <p className="text-[11px] text-slate-400 mt-1.5">
           CPCB NAAQS benchmark: {meta.benchmark} {meta.unit} ({meta.averagingPeriod})
         </p>
-        {canCompareBenchmark && instantValue !== null && (
+        {validAvg !== null && instantValue !== null && (
           <p className="text-[11px] text-slate-400 mt-0.5">
             Current hour model value: {instantValue.toFixed(1)} {meta.unit}
           </p>

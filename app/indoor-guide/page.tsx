@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Home, Bed, Utensils, Baby, Monitor, ChevronRight, Info, Wind } from 'lucide-react';
 import { useAirQuality } from '@/contexts/AirQualityContext';
 import { summarizeHourlyTrend } from '@/lib/dailyPlan';
@@ -141,13 +141,22 @@ export default function IndoorGuidePage() {
   const [selectedRoom, setSelectedRoom] = useState<Room>('bedroom');
   const [expandedTip, setExpandedTip] = useState<string | null>('3');
 
-  const roomTips = INDOOR_TIPS.filter((tip) => tip.rooms.includes(selectedRoom));
-  const roomInfo = ROOMS.find((r) => r.id === selectedRoom);
+  const roomTips = useMemo(
+    () => INDOOR_TIPS.filter((tip) => tip.rooms.includes(selectedRoom)),
+    [selectedRoom]
+  );
+  const roomInfo = useMemo(
+    () => ROOMS.find((r) => r.id === selectedRoom),
+    [selectedRoom]
+  );
 
-  const trend = summarizeHourlyTrend(forecast?.hourly ?? []);
+  const trend = useMemo(
+    () => summarizeHourlyTrend(forecast?.hourly ?? []),
+    [forecast?.hourly]
+  );
   const currentAqi = data?.aqi?.value ?? null;
 
-  const ventilationAdvice = (() => {
+  const ventilationAdvice = useMemo(() => {
     if (currentAqi === null && !trend.hasHourlyData) {
       return 'Outdoor AQI is currently incomplete/unavailable. Keep windows closed if air looks hazy or smoky, and rely on exhaust fans and indoor source control.';
     }
@@ -158,7 +167,7 @@ export default function IndoorGuidePage() {
       return `Current model estimate is ${currentAqi} AQI (${data?.aqi?.category}). Keep windows closed now; hourly model estimates project a cleaner window (${trend.cleanWindowRange}, ≤100 AQI) for brief ventilation if conditions feel clear.`;
     }
     return `Current model estimate is ${currentAqi ?? 'elevated'} AQI (${data?.aqi?.category ?? 'elevated'}) and no hourly window drops to ≤100 AQI in the next 24h forecast. Keep windows closed and rely on source control and HEPA filtration if available.`;
-  })();
+  }, [currentAqi, data?.aqi?.category, trend]);
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">
@@ -182,7 +191,11 @@ export default function IndoorGuidePage() {
       </div>
 
       {/* Dynamic Outdoor-Trend Ventilation Banner */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-100 text-sm">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-start gap-3 p-4 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-100 text-sm"
+      >
         <Wind className="w-4 h-4 flex-shrink-0 mt-0.5 text-teal-300" />
         <div>
           <span className="font-semibold text-teal-300">Current Ventilation Guidance (from outdoor model trends): </span>

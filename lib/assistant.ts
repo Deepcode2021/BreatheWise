@@ -1,5 +1,6 @@
 // Helper utilities, schemas, and validation for BreatheWise Gemini AI Assistant
 import { Type } from '@google/genai';
+import type { HourlyTrendSummary } from '@/lib/dailyPlan';
 import type { AIResponse, DailyRoutineItem, HourlyDataPoint, TimeOfDay } from '@/types';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
@@ -48,7 +49,7 @@ export interface AssistantContextInput {
   aqiUnavailableReason?: string;
   pollutants?: Record<string, number | null>;
   instantPollutants?: Record<string, number | null>;
-  hourlySummary?: Record<string, unknown>;
+  hourlySummary?: HourlyTrendSummary | Record<string, unknown>;
   hourlyForecast?: CompactHourlyForecastPoint[];
   weather?: Record<string, number | null>;
   preferences?: {
@@ -67,11 +68,17 @@ export interface AssistantHistoryItem {
   content: string;
 }
 
+/**
+ * Resolves the active Gemini model from `GEMINI_MODEL`, falling back to `gemini-3.5-flash-lite`.
+ */
 export function getConfiguredGeminiModel(): string {
   const configured = process.env.GEMINI_MODEL?.trim();
   return configured && configured.length > 0 ? configured : DEFAULT_GEMINI_MODEL;
 }
 
+/**
+ * Compresses up to 24 hourly forecast points to minimal fields suitable for Gemini prompt context.
+ */
 export function compactHourlyForecast(hourly: HourlyDataPoint[]): CompactHourlyForecastPoint[] {
   return hourly.slice(0, 24).map((h) => ({
     time: h.time,
@@ -80,6 +87,9 @@ export function compactHourlyForecast(hourly: HourlyDataPoint[]): CompactHourlyF
   }));
 }
 
+/**
+ * Bounds and sanitizes chat history turns (`user` / `assistant`) for safe Gemini multi-turn prompts.
+ */
 export function sanitizeHistory(raw: unknown): AssistantHistoryItem[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -99,6 +109,9 @@ export function sanitizeHistory(raw: unknown): AssistantHistoryItem[] {
     .slice(-MAX_HISTORY_MESSAGES);
 }
 
+/**
+ * Validates and clamps client-supplied environmental and household context inputs before prompting Gemini.
+ */
 export function sanitizeContext(raw: unknown): AssistantContextInput {
   if (!raw || typeof raw !== 'object') return {};
   const src = raw as Record<string, unknown>;
@@ -210,6 +223,9 @@ export function sanitizeContext(raw: unknown): AssistantContextInput {
   return out;
 }
 
+/**
+ * Formats sanitized environmental metrics, hourly forecasts, and preferences into a prompt context block.
+ */
 export function buildContextString(context: AssistantContextInput): string {
   const parts: string[] = [];
 
@@ -425,6 +441,9 @@ function sanitizeDailyRoutine(val: unknown): DailyRoutineItem[] {
   return items;
 }
 
+/**
+ * Validates parsed JSON returned by Gemini against the required structured `AIResponse` shape.
+ */
 export function validateAIResponse(raw: unknown): AIResponse {
   if (!raw || typeof raw !== 'object') {
     throw new Error('Response payload is not an object');
@@ -478,6 +497,9 @@ export function extractJsonObject(rawText: string): string {
   return rawText.slice(start, end + 1);
 }
 
+/**
+ * Maps raw SDK/network errors into safe HTTP status codes and user-facing error messages.
+ */
 export function classifyGeminiError(error: unknown): { status: number; message: string } {
   const errObj = error as { status?: number; code?: string; name?: string; message?: string } | null;
   const msg = (errObj?.message ?? '').toLowerCase();

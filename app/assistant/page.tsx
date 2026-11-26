@@ -150,14 +150,25 @@ export default function AssistantPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const sendMessage = useCallback(
     async (question: string) => {
       if (!question.trim() || loading) return;
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       const userMsg: ChatMessage = {
         id: generateId(),
@@ -218,6 +229,7 @@ export default function AssistantPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question, context, history }),
+          signal: controller.signal,
         });
 
         const json = await res.json();
@@ -236,6 +248,7 @@ export default function AssistantPage() {
 
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') return;
         const errMsg = err instanceof Error ? err.message : 'Unknown error';
         setApiError(errMsg);
 
@@ -279,14 +292,22 @@ export default function AssistantPage() {
       </div>
 
       {apiError && (
-        <div className="mb-4 flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-200 text-sm">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="mb-4 flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-200 text-sm"
+        >
           <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-300" />
           <span>{apiError}</span>
         </div>
       )}
 
       {/* Chat area */}
-      <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1">
+      <div
+        aria-live="polite"
+        aria-relevant="additions"
+        className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1"
+      >
         {messages.length === 0 && (
           <div className="text-center py-10">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-500/20 flex items-center justify-center mx-auto mb-4 border border-teal-500/20">
@@ -344,7 +365,7 @@ export default function AssistantPage() {
         ))}
 
         {loading && (
-          <div className="flex gap-3 justify-start">
+          <div role="status" aria-live="polite" className="flex gap-3 justify-start">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-500 to-emerald-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-teal-500/20">
               <Bot className="w-4 h-4 text-white" />
             </div>

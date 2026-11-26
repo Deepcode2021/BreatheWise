@@ -15,6 +15,7 @@ import {
 
 const BASE_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO_TIMEOUT_MS = 8000;
 
 interface OpenMeteoAQResponse {
   latitude: number;
@@ -53,6 +54,10 @@ interface OpenMeteoWeatherResponse {
   };
 }
 
+/**
+ * Fetches air quality (24h lookback + 5-day hourly forecast) and current weather from Open-Meteo
+ * using bounded request timeouts and ISR revalidation, then maps to Indian CPCB estimates.
+ */
 export async function fetchOpenMeteoAirQuality(
   location: Location
 ): Promise<{ data: AirQualityData; forecast: AirQualityForecast }> {
@@ -77,19 +82,32 @@ export async function fetchOpenMeteoAirQuality(
     timezone: 'auto',
   });
 
-  const [aqRes, weatherRes] = await Promise.all([
-    fetch(`${BASE_URL}?${aqParams}`, { next: { revalidate: 1800 } }),
-    fetch(`${WEATHER_URL}?${weatherParams}`, { next: { revalidate: 1800 } }),
-  ]);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OPEN_METEO_TIMEOUT_MS);
 
-  if (!aqRes.ok) {
-    throw new Error(`Open-Meteo AQ API error: ${aqRes.status}`);
+  try {
+    const [aqRes, weatherRes] = await Promise.all([
+      fetch(`${BASE_URL}?${aqParams}`, {
+        next: { revalidate: 1800 },
+        signal: controller.signal,
+      }),
+      fetch(`${WEATHER_URL}?${weatherParams}`, {
+        next: { revalidate: 1800 },
+        signal: controller.signal,
+      }),
+    ]);
+
+    if (!aqRes.ok) {
+      throw new Error(`Open-Meteo AQ API error: ${aqRes.status}`);
+    }
+
+    const aqData: OpenMeteoAQResponse = await aqRes.json();
+    const weatherData: OpenMeteoWeatherResponse = weatherRes.ok ? await weatherRes.json() : {};
+
+    return transformOpenMeteoResponse(location, aqData, weatherData);
+  } finally {
+    clearTimeout(timer);
   }
-
-  const aqData: OpenMeteoAQResponse = await aqRes.json();
-  const weatherData: OpenMeteoWeatherResponse = weatherRes.ok ? await weatherRes.json() : {};
-
-  return transformOpenMeteoResponse(location, aqData, weatherData);
 }
 
 /**
@@ -142,7 +160,7 @@ export function transformOpenMeteoResponse(
     currentIdx = Math.min(23, times.length - 1);
   }
 
-  // Compute CPCB AQI from proper 24h / 8h rolling windows ending at currentIdx
+  // Compute CPCB AQI from proper 24h / 8h rolling windows ending at idx
   const windowAt = (idx: number) => {
     const start24 = Math.max(0, idx - 23);
     const start8 = Math.max(0, idx - 7);
@@ -176,34 +194,38 @@ export function transformOpenMeteoResponse(
     isModelEstimate: true,
   };
 
-  // Build hourly forecast starting from currentIdx (next 48 hours)
+  // Build next-48h hourly forecast and 5-day forecast in a single pass from currentIdx
   const hourlyPoints: HourlyDataPoint[] = [];
-  if (times.length > 0 && currentIdx >= 0) {
-    const endIdx = Math.min(times.length, currentIdx + 48);
-    for (let i = currentIdx; i < endIdx; i++) {
-      const hourCalc = calculateCPCBAQIFromWindows(windowAt(i));
-      hourlyPoints.push({
-        time: times[i],
-        aqi: hourCalc.aqi?.value ?? null,
-        pm25: hourly?.pm2_5?.[i] ?? null,
-        pm10: hourly?.pm10?.[i] ?? null,
-        no2: hourly?.nitrogen_dioxide?.[i] ?? null,
-        o3: hourly?.ozone?.[i] ?? null,
-      });
-    }
-  }
-
-  // Build 5-day forecast from all forecast hours (currentIdx onwards) using CPCB categories
   const dailyMap = new Map<string, { aqis: number[]; pm25s: number[] }>();
+
   if (times.length > 0 && currentIdx >= 0) {
+    const hourlyEndIdx = Math.min(times.length, currentIdx + 48);
     for (let i = currentIdx; i < times.length; i++) {
-      const day = times[i].split('T')[0];
-      if (!dailyMap.has(day)) dailyMap.set(day, { aqis: [], pm25s: [] });
-      const entry = dailyMap.get(day)!;
       const hourCalc = calculateCPCBAQIFromWindows(windowAt(i));
-      if (hourCalc.aqi !== null) entry.aqis.push(hourCalc.aqi.value);
-      const pm = hourly?.pm2_5?.[i];
-      if (typeof pm === 'number' && Number.isFinite(pm) && pm >= 0) entry.pm25s.push(pm);
+      const aqiValue = hourCalc.aqi?.value ?? null;
+      const pm25Value = hourly?.pm2_5?.[i] ?? null;
+
+      if (i < hourlyEndIdx) {
+        hourlyPoints.push({
+          time: times[i],
+          aqi: aqiValue,
+          pm25: pm25Value,
+          pm10: hourly?.pm10?.[i] ?? null,
+          no2: hourly?.nitrogen_dioxide?.[i] ?? null,
+          o3: hourly?.ozone?.[i] ?? null,
+        });
+      }
+
+      const day = times[i].split('T')[0];
+      let entry = dailyMap.get(day);
+      if (!entry) {
+        entry = { aqis: [], pm25s: [] };
+        dailyMap.set(day, entry);
+      }
+      if (aqiValue !== null) entry.aqis.push(aqiValue);
+      if (typeof pm25Value === 'number' && Number.isFinite(pm25Value) && pm25Value >= 0) {
+        entry.pm25s.push(pm25Value);
+      }
     }
   }
 

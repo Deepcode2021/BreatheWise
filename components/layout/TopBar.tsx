@@ -92,6 +92,16 @@ export function TopBar({ onMenuClick }: TopBarProps) {
       >
         <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
       </button>
+
+      <div className="sr-only" role="status" aria-live="polite">
+        {loading
+          ? 'Refreshing air quality data...'
+          : data?.aqi
+          ? `${data.location.name} estimated AQI ${data.aqi.value}, ${data.aqi.category}`
+          : data
+          ? `${data.location.name} air quality loaded with incomplete AQI averaging data`
+          : ''}
+      </div>
     </header>
   );
 }

@@ -22,10 +22,13 @@ export function formatTimestamp(iso: string): string {
   }
 }
 
-export function formatRelativeTime(iso: string): string {
+/**
+ * Formats an ISO timestamp into a human-readable relative time label.
+ */
+export function formatRelativeTime(iso: string, nowMs = Date.now()): string {
   try {
-    const diff = Date.now() - new Date(iso).getTime();
-    if (diff < 0) return 'just now';
+    const diff = nowMs - new Date(iso).getTime();
+    if (!Number.isFinite(diff) || diff < 0) return 'just now';
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
     if (mins < 60) return `${mins} min ago`;
@@ -37,9 +40,12 @@ export function formatRelativeTime(iso: string): string {
   }
 }
 
-export function isTimestampStale(iso: string, thresholdMinutes = 120): boolean {
+/**
+ * Checks whether an ISO timestamp is older than `thresholdMinutes`.
+ */
+export function isTimestampStale(iso: string, thresholdMinutes = 120, nowMs = Date.now()): boolean {
   try {
-    const diff = Date.now() - new Date(iso).getTime();
+    const diff = nowMs - new Date(iso).getTime();
     if (!Number.isFinite(diff)) return false;
     return diff > thresholdMinutes * 60_000;
   } catch {

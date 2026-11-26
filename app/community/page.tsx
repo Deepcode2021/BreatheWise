@@ -307,6 +307,7 @@ export default function CommunityPage() {
           <button
             key={cat}
             onClick={() => setCategory(cat)}
+            aria-pressed={category === cat}
             className={cn(
               'px-4 py-2 rounded-xl text-sm font-medium transition-colors duration-200',
               category === cat

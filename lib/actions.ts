@@ -235,9 +235,13 @@ export const ACTION_TEMPLATES: ActionTemplate[] = [
   },
 ];
 
+/**
+ * Generates uncompleted daily action templates for today, excluding action titles already present.
+ */
 export function getTodayActions(existingActions: string[] = []): DailyAction[] {
   const today = new Date().toISOString().split('T')[0];
-  return ACTION_TEMPLATES.filter((t) => !existingActions.includes(t.action)).map((t) => ({
+  const existingSet = new Set(existingActions);
+  return ACTION_TEMPLATES.filter((t) => !existingSet.has(t.action)).map((t) => ({
     id: generateId(),
     category: t.category,
     action: t.action,
@@ -249,4 +253,91 @@ export function getTodayActions(existingActions: string[] = []): DailyAction[] {
     completed: false,
     date: today,
   }));
+}
+
+export interface WeeklyImpactPoint {
+  day: string;
+  actions: number;
+  co2: number;
+}
+
+/**
+ * Aggregates completed action counts and CO2e savings across the trailing `daysCount` days in O(N + D).
+ */
+export function buildWeeklyImpactData(
+  allActions: DailyAction[],
+  daysCount = 7,
+  referenceDate = new Date()
+): WeeklyImpactPoint[] {
+  const grouped = new Map<string, { actions: number; co2: number }>();
+  for (const act of allActions) {
+    if (!act.completed) continue;
+    let bucket = grouped.get(act.date);
+    if (!bucket) {
+      bucket = { actions: 0, co2: 0 };
+      grouped.set(act.date, bucket);
+    }
+    bucket.actions += 1;
+    bucket.co2 += act.co2Saved;
+  }
+
+  const days: WeeklyImpactPoint[] = [];
+  for (let i = daysCount - 1; i >= 0; i--) {
+    const d = new Date(referenceDate);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const bucket = grouped.get(dateStr);
+    days.push({
+      day: d.toLocaleDateString('en-IN', { weekday: 'short' }),
+      actions: bucket?.actions ?? 0,
+      co2: bucket ? Math.round(bucket.co2 * 10) / 10 : 0,
+    });
+  }
+  return days;
+}
+
+/**
+ * Computes the consecutive completed-action day streak ending today (or yesterday if today has no completions yet).
+ */
+export function calculateActionStreak(
+  allActions: DailyAction[],
+  maxDays = 30,
+  referenceDate = new Date()
+): number {
+  const completedDates = new Set<string>();
+  for (const act of allActions) {
+    if (act.completed) completedDates.add(act.date);
+  }
+
+  let streak = 0;
+  for (let i = 0; i < maxDays; i++) {
+    const d = new Date(referenceDate);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    if (completedDates.has(dateStr)) {
+      streak++;
+    } else if (i > 0) {
+      break;
+    }
+  }
+  return streak;
+}
+
+/**
+ * Computes per-category action completion totals for today's checklist.
+ */
+export function computeCategoryProgress(
+  actions: DailyAction[]
+): Record<string, { total: number; completed: number }> {
+  const byCategory: Record<string, { total: number; completed: number }> = {};
+  for (const act of actions) {
+    if (!byCategory[act.category]) {
+      byCategory[act.category] = { total: 0, completed: 0 };
+    }
+    byCategory[act.category].total += 1;
+    if (act.completed) {
+      byCategory[act.category].completed += 1;
+    }
+  }
+  return byCategory;
 }

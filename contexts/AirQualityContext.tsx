@@ -1,7 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { AirQualityData, AirQualityForecast, Location } from '@/types';
+import { isValidLocationObject } from '@/lib/validation';
 
 const DEFAULT_LOCATION: Location = {
   name: 'Delhi',
@@ -133,7 +134,10 @@ export function AirQualityProvider({ children }: { children: React.ReactNode }) 
     try {
       const saved = localStorage.getItem('breathewise_location');
       if (saved) {
-        initialLoc = JSON.parse(saved) as Location;
+        const parsed: unknown = JSON.parse(saved);
+        if (isValidLocationObject(parsed)) {
+          initialLoc = parsed;
+        }
       }
     } catch {}
     const timer = setTimeout(() => {
@@ -145,20 +149,23 @@ export function AirQualityProvider({ children }: { children: React.ReactNode }) 
     };
   }, [loadForLocation]);
 
+  const contextValue = useMemo(
+    () => ({
+      data,
+      forecast,
+      loading,
+      error,
+      location,
+      setLocation,
+      refresh,
+      detectCurrentLocation,
+      gettingLocation,
+    }),
+    [data, forecast, loading, error, location, setLocation, refresh, detectCurrentLocation, gettingLocation]
+  );
+
   return (
-    <AirQualityContext.Provider
-      value={{
-        data,
-        forecast,
-        loading,
-        error,
-        location,
-        setLocation,
-        refresh,
-        detectCurrentLocation,
-        gettingLocation,
-      }}
-    >
+    <AirQualityContext.Provider value={contextValue}>
       {children}
     </AirQualityContext.Provider>
   );

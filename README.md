@@ -8,6 +8,7 @@ BreatheWise is an interactive, AI-powered urban air-quality decision-support web
 
 ## Table of Contents
 
+- [0. Problem Statement -> Solution Mapping](#-problem-statement--solution-mapping)
 - [1. Project Objectives](#-1-project-objectives)
 - [2. Architecture & Data Flow](#-2-architecture--data-flow)
 - [3. Features Overview](#-3-features-overview)
@@ -20,6 +21,22 @@ BreatheWise is an interactive, AI-powered urban air-quality decision-support web
 - [10. Setup, Scripts & Testing](#-10-setup-scripts--testing)
 - [11. Deployment (Vercel)](#-11-deployment-vercel)
 - [12. Transparency, Privacy & Disclaimers](#-12-transparency-privacy--disclaimers)
+
+---
+
+## Problem Statement -> Solution Mapping
+
+| Challenge / User Need | BreatheWise Solution | Primary Route(s) & Implementation Files |
+|---|---|---|
+| **Hyperlocal smog & pollutant visibility** | Live/forecast multi-pollutant monitoring (`PM2.5`, `PM10`, `NO₂`, `SO₂`, `CO`, `O₃`), weather context, city search, geolocation, freshness checks, and non-official model attribution | `/` · [`app/page.tsx`](app/page.tsx), [`components/dashboard/DashboardClient.tsx`](components/dashboard/DashboardClient.tsx), [`components/dashboard/DataSourceBadge.tsx`](components/dashboard/DataSourceBadge.tsx), [`app/api/air-quality/route.ts`](app/api/air-quality/route.ts), [`lib/openMeteo.ts`](lib/openMeteo.ts) |
+| **Indian CPCB AQI accuracy & missing-data honesty** | Strict 24h (`>=16/24h`) and 8h (`>=6/8h`) rolling averaging, CO unit conversion (`µg/m³` -> `mg/m³`), minimum 3-pollutant + PM validity gating, and incomplete-AQI fallback display | `/` · [`lib/aqi.ts`](lib/aqi.ts), [`components/dashboard/AQIGauge.tsx`](components/dashboard/AQIGauge.tsx), [`components/dashboard/AQIStatusCard.tsx`](components/dashboard/AQIStatusCard.tsx), [`components/dashboard/PollutantCards.tsx`](components/dashboard/PollutantCards.tsx) |
+| **Vulnerable household groups** (`Children`, `Elderly`, `Respiratory`) | Family Protection Mode + commute & HEPA purifier profile persisted locally and injected into AI prompts and daily routine caution thresholds | `/settings` · [`app/settings/page.tsx`](app/settings/page.tsx), [`contexts/PreferencesContext.tsx`](contexts/PreferencesContext.tsx), [`lib/preferences.ts`](lib/preferences.ts) |
+| **Real-time AI decision support** | Server-side Google Gemini assistant hydrated with live Open-Meteo readings, hourly forecast windows, and household profile; strict schema-validated non-medical responses | `/assistant` · [`app/assistant/page.tsx`](app/assistant/page.tsx), [`app/api/assistant/route.ts`](app/api/assistant/route.ts), [`lib/assistant.ts`](lib/assistant.ts) |
+| **Actionable daily routine without clock bias** | Data-driven 6-slot daily plan computing chronological contiguous clean-air windows (`<=100` AQI) from hourly forecast buckets, never assuming morning is cleaner | `/daily-plan` · [`app/daily-plan/page.tsx`](app/daily-plan/page.tsx), [`lib/dailyPlan.ts`](lib/dailyPlan.ts) |
+| **Indoor exposure & ventilation guidance** | Room-by-room guide (`Bedroom`, `Living Room`, `Kitchen`, `Children's Room`, `Home Office`) with dynamic outdoor-trend ventilation advice, HEPA CADR factors, and ozone-cleaner warnings | `/indoor-guide` · [`app/indoor-guide/page.tsx`](app/indoor-guide/page.tsx) |
+| **Sustainable choices & CO₂e accountability** | Curated eco-alternatives, single-trip CO₂e calculator (India GHG Program / MoEFCC / IPCC factors), daily checklist, and 7-day trend chart | `/green-choices`, `/impact` · [`app/green-choices/page.tsx`](app/green-choices/page.tsx), [`app/impact/page.tsx`](app/impact/page.tsx), [`lib/actions.ts`](lib/actions.ts) |
+| **Community action & clean-air habits** | Clearly labeled local demo challenge templates with actionable tips and browser-persisted participation | `/community` · [`app/community/page.tsx`](app/community/page.tsx) |
+| **Production security, accessibility & bundle efficiency** | Strict HTTP security headers (CSP, `X-Frame-Options`, COOP, `Permissions-Policy`), API coordinate/query validation + rate limiting, skip-link & ARIA live regions, inline CSS + dynamic chart splitting | [`next.config.ts`](next.config.ts), [`lib/validation.ts`](lib/validation.ts), [`lib/rateLimit.ts`](lib/rateLimit.ts), [`components/layout/AppShell.tsx`](components/layout/AppShell.tsx) |
 
 ---
 
@@ -136,9 +153,9 @@ $$\text{CO}_2\text{e Saved (kg)} = \max\left(0,\ \left(\frac{\text{EF}_{\text{ba
 
 | Method & Route | Query / Body | Response |
 |---|---|---|
-| `GET /api/air-quality` | `?lat=<num>&lon=<num>&name=<str>&country=<str>&state=<str>` or `?demo=true` | `{ data: AirQualityData, forecast: AirQualityForecast }` (`Cache-Control: public, max-age=1800, stale-while-revalidate=300`; returns `503` with clearly marked demo fallback if upstream fails) |
-| `GET /api/geocode` | `?q=<city_name>` | `{ results: Location[] }` (up to 5 matches via Open-Meteo Geocoding) |
-| `POST /api/assistant` | `{ question, context?, history? }` | `{ response: AIResponse, model: string }` or safe structured error (`400` / `429` / `502` / `503` / `504`) |
+| `GET /api/air-quality` | `?lat=<[-90..90]>&lon=<[-180..180]>&name=<str>&country=<str>&state=<str>` or `?demo=true` | `{ data: AirQualityData, forecast: AirQualityForecast }` (`400` on invalid coordinates; `Cache-Control: public, max-age=1800, stale-while-revalidate=300`; returns `503` with clearly marked demo fallback if upstream fails) |
+| `GET /api/geocode` | `?q=<city_name>` (`<= 100` chars) | `{ results: Location[] }` (`400` on invalid/oversized query; up to 5 validated matches; `Cache-Control: public, max-age=3600, stale-while-revalidate=600`) |
+| `POST /api/assistant` | `{ question, context?, history? }` (`<= 32 KB` JSON body) | `{ response: AIResponse, model: string }` or safe structured error (`400` / `413` / `429` rate limit / `502` / `503` / `504`) |
 
 ---
 
@@ -175,31 +192,36 @@ BreatheWise/
 │   ├── not-found.tsx               # 404 page
 │   └── page.tsx                    # Live Air Quality Dashboard
 ├── components/
-│   ├── dashboard/                  # AQIGauge, AQIStatusCard, PollutantCards, HourlyChart,
-│   │                               # ForecastCards, WeatherCard, LocationSearch,
+│   ├── dashboard/                  # AQIGauge, AQIStatusCard, PollutantCards, HourlyChart (dynamic),
+│   │                               # ForecastCards (dynamic), WeatherCard, LocationSearch,
+│   │                               # LocationSearchDropdown (dynamic), DashboardClient,
 │   │                               # DataSourceBadge, DashboardSkeleton
-│   └── layout/                     # AppShell, Sidebar, TopBar, MobileNav
+│   ├── impact/                     # WeeklyImpactChart (dynamic Recharts bar chart)
+│   └── layout/                     # AppShell (with skip-link), Sidebar, TopBar, MobileNav
 ├── contexts/
 │   ├── AirQualityContext.tsx       # Global air quality, geolocation & refresh state
 │   └── PreferencesContext.tsx      # Persistent household preferences (useSyncExternalStore)
 ├── lib/
-│   ├── actions.ts                  # Emission factors, CO2e calculator & action templates
+│   ├── actions.ts                  # Emission factors, CO2e calculator, streak & weekly aggregations
 │   ├── aqi.ts                      # CPCB breakpoints, 24h/8h averaging & availability rules
 │   ├── assistant.ts                # Gemini prompt, schema, sanitizer & error mapping
 │   ├── dailyPlan.ts                # Contiguous clean-window & dynamic routine generator
 │   ├── demoData.ts                 # Fallback demo payload (clearly labeled)
-│   ├── geocoding.ts                # Open-Meteo Geocoding + popular Indian cities
-│   ├── openMeteo.ts                # Open-Meteo client & pure payload transformer
-│   ├── preferences.ts              # LocalStorage helpers
-│   └── utils.ts                    # Timestamp, staleness (>2h) & weather helpers
+│   ├── geocoding.ts                # Open-Meteo Geocoding + payload validation + popular cities
+│   ├── openMeteo.ts                # Open-Meteo client (with timeouts) & single-pass transformer
+│   ├── preferences.ts              # Validated localStorage preference helpers
+│   ├── rateLimit.ts                # Memory-bounded sliding-window rate limiter
+│   ├── utils.ts                    # Timestamp, staleness (>2h) & weather helpers
+│   └── validation.ts               # Coordinate, geocode query & runtime shape validators
 ├── tests/
 │   ├── register-alias.mjs          # Native Node TS/path-alias loader for tests
 │   ├── aqi.test.ts                 # CPCB breakpoints, averaging & Open-Meteo tests
 │   ├── assistant.test.ts           # Gemini helper, validation & error mapping tests
-│   └── dailyPlanAndImpact.test.ts  # Dynamic daily plan & CO2e calculation tests
+│   ├── dailyPlanAndImpact.test.ts  # Dynamic daily plan & CO2e calculation tests
+│   └── validationAndSecurity.test.ts # Input validation, rate limiting, utils & ReDoS tests
 ├── types/index.ts                  # Shared TypeScript interfaces
 ├── .env.example                    # Environment variable placeholders
-├── next.config.ts                  # Turbopack CSS rule & image config
+├── next.config.ts                  # Security headers, inlineCss, optimizePackageImports & Turbopack rules
 ├── vercel.json                     # Vercel build/framework settings
 ├── API_SETUP.md                    # Gemini & optional CPCB/OpenAQ setup guide
 ├── TESTING.md                      # Manual QA & calculation test checklist

@@ -37,6 +37,11 @@ export interface HourlyTrendSummary {
   };
 }
 
+interface ValidHourlyPoint {
+  time: string;
+  aqi: number;
+}
+
 function formatHourOnly(iso: string): string {
   try {
     const d = new Date(iso);
@@ -67,15 +72,14 @@ export function findContiguousCleanWindows(
   const firstDateStr = hourlyPoints[0].time.slice(0, 10);
   const windows: CleanWindow[] = [];
 
-  let active: HourlyDataPoint[] = [];
+  let active: ValidHourlyPoint[] = [];
 
   const flush = () => {
     if (active.length === 0) return;
     const startPt = active[0];
     const endPt = active[active.length - 1];
-    const aqis = active.map((p) => p.aqi!);
+    const aqis = active.map((p) => p.aqi);
     const startLabel = formatDayHour(startPt.time, firstDateStr);
-    // Represent end boundary as end hour + 1h (or exact hour label if 1 hour)
     const endDate = new Date(endPt.time);
     let endLabel = formatDayHour(endPt.time, firstDateStr);
     if (!Number.isNaN(endDate.getTime())) {
@@ -99,7 +103,7 @@ export function findContiguousCleanWindows(
 
   for (const pt of hourlyPoints) {
     if (pt.aqi !== null && Number.isFinite(pt.aqi) && pt.aqi <= maxThreshold) {
-      active.push(pt);
+      active.push({ time: pt.time, aqi: pt.aqi });
     } else {
       flush();
     }
@@ -109,9 +113,18 @@ export function findContiguousCleanWindows(
   return windows;
 }
 
+/**
+ * Summarizes the chronological next 24 hours of hourly model forecasts into min/max bounds,
+ * time-of-day bucket averages, and strictly contiguous cleaner windows (<=100 AQI).
+ */
 export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSummary {
   const next24Chrono = hourly.slice(0, 24);
-  const next24 = next24Chrono.filter((h) => h.aqi !== null && Number.isFinite(h.aqi));
+  const next24: ValidHourlyPoint[] = [];
+  for (const h of next24Chrono) {
+    if (h.aqi !== null && Number.isFinite(h.aqi)) {
+      next24.push({ time: h.time, aqi: h.aqi });
+    }
+  }
 
   if (next24.length === 0) {
     return {
@@ -142,28 +155,32 @@ export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSumm
   };
 
   for (const pt of next24) {
-    const val = pt.aqi!;
-    if (val < best.aqi!) best = pt;
-    if (val > worst.aqi!) worst = pt;
+    if (pt.aqi < best.aqi) best = pt;
+    if (pt.aqi > worst.aqi) worst = pt;
 
     const hr = new Date(pt.time).getHours();
-    if (hr >= 6 && hr < 10) buckets.morning.push(val);
-    else if (hr >= 10 && hr < 16) buckets.afternoon.push(val);
-    else if (hr >= 16 && hr < 21) buckets.evening.push(val);
-    else buckets.night.push(val);
+    if (hr >= 6 && hr < 10) buckets.morning.push(pt.aqi);
+    else if (hr >= 10 && hr < 16) buckets.afternoon.push(pt.aqi);
+    else if (hr >= 16 && hr < 21) buckets.evening.push(pt.aqi);
+    else buckets.night.push(pt.aqi);
   }
 
   const avg = (arr: number[]) =>
     arr.length > 0 ? Math.round(arr.reduce((s, n) => s + n, 0) / arr.length) : null;
 
   const contiguousCleanWindows = findContiguousCleanWindows(next24Chrono, 100);
-  // Pick the longest (tie-break: lowest minAqi) contiguous clean window
-  const bestCleanWindow =
-    contiguousCleanWindows.length > 0
-      ? [...contiguousCleanWindows].sort((a, b) => b.hours - a.hours || a.minAqi - b.minAqi)[0]
-      : null;
+  let bestCleanWindow: CleanWindow | null = null;
+  for (const win of contiguousCleanWindows) {
+    if (
+      !bestCleanWindow ||
+      win.hours > bestCleanWindow.hours ||
+      (win.hours === bestCleanWindow.hours && win.minAqi < bestCleanWindow.minAqi)
+    ) {
+      bestCleanWindow = win;
+    }
+  }
 
-  const spread = worst.aqi! - best.aqi!;
+  const spread = worst.aqi - best.aqi;
   const forecastUncertaintyNote =
     spread >= 60
       ? `Model forecast varies substantially (${best.aqi}–${worst.aqi} est. AQI over 24h); re-check readings before heading out.`
@@ -171,12 +188,12 @@ export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSumm
 
   return {
     hasHourlyData: true,
-    minAqi: best.aqi!,
-    maxAqi: worst.aqi!,
+    minAqi: best.aqi,
+    maxAqi: worst.aqi,
     bestHourLabel: formatDayHour(best.time, firstDateStr),
-    bestHourAqi: best.aqi!,
+    bestHourAqi: best.aqi,
     worstHourLabel: formatDayHour(worst.time, firstDateStr),
-    worstHourAqi: worst.aqi!,
+    worstHourAqi: worst.aqi,
     hasGoodOrSatisfactoryWindow: contiguousCleanWindows.length > 0,
     cleanWindowRange: bestCleanWindow ? bestCleanWindow.label : null,
     contiguousCleanWindows,
@@ -190,58 +207,58 @@ export function summarizeHourlyTrend(hourly: HourlyDataPoint[]): HourlyTrendSumm
   };
 }
 
-export function generateDynamicDailyPlan(params: {
-  aqi: AQIInfo | null;
+interface RoutineContext {
+  trend: HourlyTrendSummary;
+  category: AQICategory;
+  currentAqi: number | null;
   pollutants?: Pollutants;
-  hourly: HourlyDataPoint[];
   preferences: UserPreferences;
-}): DailyRoutineItem[] {
-  const { aqi, pollutants, hourly, preferences } = params;
-  const trend = summarizeHourlyTrend(hourly);
-  const category: AQICategory = aqi?.category ?? 'Unknown';
-  const currentAqi = aqi?.value ?? null;
+  hasVulnerable: boolean;
+  isGoodOrSatisfactory: boolean;
+  isModerate: boolean;
+  isPoorOrWorse: boolean;
+  isVeryPoorOrSevere: boolean;
+}
 
-  const hasChildren = preferences.familyMembers.includes('children');
-  const hasElderly = preferences.familyMembers.includes('elderly');
-  const hasRespiratory = preferences.familyMembers.includes('respiratory');
-  const hasVulnerable = hasChildren || hasElderly || hasRespiratory;
+function formatBucketText(val: number | null): string {
+  return val !== null ? `Model estimate ~${val} AQI` : 'Hourly bucket estimate unavailable';
+}
 
-  const isGoodOrSatisfactory = category === 'Good' || category === 'Satisfactory';
-  const isModerate = category === 'Moderate';
-  const isPoorOrWorse =
-    category === 'Poor' || category === 'Very Poor' || category === 'Severe' || category === 'Hazardous';
-  const isVeryPoorOrSevere =
-    category === 'Very Poor' || category === 'Severe' || category === 'Hazardous';
-
-  const bucketText = (val: number | null) =>
-    val !== null ? `Model estimate ~${val} AQI` : 'Hourly bucket estimate unavailable';
-
-  // 1. Morning routine (derived from morning hourly bucket, never assuming morning is cleaner)
+function buildMorningRoutine(ctx: RoutineContext): DailyRoutineItem {
+  const { trend, category, currentAqi, preferences, hasVulnerable, isGoodOrSatisfactory, isModerate, isPoorOrWorse } = ctx;
   const morningBucket = trend.bucketAverages.morning;
   const morningElevated =
     (morningBucket !== null && morningBucket > 100) || isPoorOrWorse || (isModerate && hasVulnerable);
 
-  const morningItem: DailyRoutineItem = {
+  let action: string;
+  if (currentAqi === null) {
+    action = 'Check pollutant concentrations before opening windows or exercising outdoors';
+  } else if (isGoodOrSatisfactory && !morningElevated) {
+    action = 'Normal morning routine; light ventilation if outdoor conditions feel clear';
+  } else if (morningElevated) {
+    action = 'Keep windows closed during morning hours and keep activities indoors';
+  } else {
+    action = 'Keep morning outdoor activity brief and low-intensity';
+  }
+
+  let why: string;
+  if (morningBucket !== null && morningBucket > 200) {
+    why = `Morning hourly model estimates reach ~${morningBucket} AQI (Poor or worse), often aggravated by thermal inversions and rush-hour traffic.`;
+  } else if (morningBucket !== null && morningBucket > 100) {
+    why = `Morning hourly model estimates are ~${morningBucket} AQI (Moderate); prolonged exertion may affect sensitive groups.`;
+  } else if (currentAqi === null) {
+    why = 'Estimated Indian AQI could not be computed due to incomplete averaging data; avoid assuming morning air is clean.';
+  } else {
+    why = `Morning hourly model estimates average ~${morningBucket ?? currentAqi} AQI (${category}), which is generally suitable for normal routines.`;
+  }
+
+  return {
     timeOfDay: 'morning',
     timeLabel: 'Morning (06:00–10:00)',
     icon: '☀️',
-    action:
-      currentAqi === null
-        ? 'Check pollutant concentrations before opening windows or exercising outdoors'
-        : isGoodOrSatisfactory && !morningElevated
-        ? 'Normal morning routine; light ventilation if outdoor conditions feel clear'
-        : morningElevated
-        ? 'Keep windows closed during morning hours and keep activities indoors'
-        : 'Keep morning outdoor activity brief and low-intensity',
-    when: `06:00–10:00 · ${bucketText(morningBucket)}`,
-    why:
-      morningBucket !== null && morningBucket > 200
-        ? `Morning hourly model estimates reach ~${morningBucket} AQI (Poor or worse), often aggravated by thermal inversions and rush-hour traffic.`
-        : morningBucket !== null && morningBucket > 100
-        ? `Morning hourly model estimates are ~${morningBucket} AQI (Moderate); prolonged exertion may affect sensitive groups.`
-        : currentAqi === null
-        ? 'Estimated Indian AQI could not be computed due to incomplete averaging data; avoid assuming morning air is clean.'
-        : `Morning hourly model estimates average ~${morningBucket ?? currentAqi} AQI (${category}), which is generally suitable for normal routines.`,
+    action,
+    when: `06:00–10:00 · ${formatBucketText(morningBucket)}`,
+    why,
     howItHelps: morningElevated
       ? 'Avoids breathing elevated morning particulate levels during inversion or peak traffic hours.'
       : 'Aligns outdoor activity with model-estimated lower-pollution periods while monitoring changes.',
@@ -250,18 +267,26 @@ export function generateDynamicDailyPlan(params: {
       : 'Choose indoor stretching or breathing space away from street-facing windows.',
     completed: false,
   };
+}
 
-  // 2. Commute routine
+function buildCommuteRoutine(ctx: RoutineContext): DailyRoutineItem {
+  const { trend, category, currentAqi, preferences, isModerate, isPoorOrWorse, isVeryPoorOrSevere } = ctx;
   const commutePreference = preferences.transportMode;
-  const commuteItem: DailyRoutineItem = {
+
+  let action: string;
+  if (isVeryPoorOrSevere) {
+    action = 'Use enclosed public transit (metro/AC bus) or work remotely if feasible; use a well-fitted N95/FFP2 mask outdoors';
+  } else if (commutePreference === 'private-car') {
+    action = 'Switch to metro/bus or carpool if practical; avoid congested corridors';
+  } else {
+    action = 'Prefer metro/bus or low-traffic side streets; avoid active cycling along heavy traffic if AQI > 100';
+  }
+
+  return {
     timeOfDay: 'commute',
     timeLabel: 'School & Office Commute',
     icon: '🚌',
-    action: isVeryPoorOrSevere
-      ? 'Use enclosed public transit (metro/AC bus) or work remotely if feasible; use a well-fitted N95/FFP2 mask outdoors'
-      : commutePreference === 'private-car'
-      ? 'Switch to metro/bus or carpool if practical; avoid congested corridors'
-      : 'Prefer metro/bus or low-traffic side streets; avoid active cycling along heavy traffic if AQI > 100',
+    action,
     when: `Peak commute hours · ${trend.forecastUncertaintyNote}`,
     why: isPoorOrWorse
       ? `Current estimated AQI is ${currentAqi ?? 'elevated'} (${category}). Roadside NO₂ and PM2.5 are typically higher than regional model averages.`
@@ -276,84 +301,94 @@ export function generateDynamicDailyPlan(params: {
         : 'For unavoidable short walks in Poor+ air, choose quieter lanes away from arterial roads.',
     completed: false,
   };
+}
 
-  // 3. Outdoor exercise — strictly data-driven from contiguous chronological hourly forecast
-  let exerciseAction: string;
-  let exerciseWhen: string;
-  let exerciseWhy: string;
-  let exerciseAlternative: string;
+function buildExerciseRoutine(ctx: RoutineContext): DailyRoutineItem {
+  const { trend, category, currentAqi, pollutants, preferences, hasVulnerable, isGoodOrSatisfactory, isModerate, isPoorOrWorse } = ctx;
+
+  let action: string;
+  let when: string;
+  let why: string;
+  let alternative: string;
 
   if (currentAqi === null && !trend.hasHourlyData) {
-    exerciseAction = 'Prefer indoor exercise until complete AQI data is available';
-    exerciseWhen = 'Anytime indoors (hourly trend unavailable)';
-    exerciseWhy =
+    action = 'Prefer indoor exercise until complete AQI data is available';
+    when = 'Anytime indoors (hourly trend unavailable)';
+    why =
       'Estimated Indian AQI and hourly trend data are currently incomplete. Avoid intense outdoor exertion without verified air quality conditions.';
-    exerciseAlternative =
+    alternative =
       pollutants?.pm25 !== null && pollutants?.pm25 !== undefined
         ? `Current PM2.5 estimate is ${pollutants.pm25.toFixed(1)} µg/m³; opt for light indoor mobility instead.`
         : 'Do indoor yoga, bodyweight exercises, or stationary cycling.';
   } else if (isPoorOrWorse && !trend.hasGoodOrSatisfactoryWindow) {
-    exerciseAction = 'No suitable outdoor exercise window — move all workouts indoors';
-    exerciseWhen = `Indoor workout recommended all day (24h model min: ${trend.minAqi ?? currentAqi} AQI)`;
-    exerciseWhy = `All forecast hours remain above Satisfactory (>100 AQI; peak ~${trend.maxAqi ?? currentAqi}). Exercising outdoors increases ventilation rate and inhaled particle dose.`;
-    exerciseAlternative = preferences.hasAirPurifier
+    action = 'No suitable outdoor exercise window — move all workouts indoors';
+    when = `Indoor workout recommended all day (24h model min: ${trend.minAqi ?? currentAqi} AQI)`;
+    why = `All forecast hours remain above Satisfactory (>100 AQI; peak ~${trend.maxAqi ?? currentAqi}). Exercising outdoors increases ventilation rate and inhaled particle dose.`;
+    alternative = preferences.hasAirPurifier
       ? 'Exercise indoors in a closed room with your HEPA purifier running.'
       : 'Perform low-dust indoor bodyweight training, yoga, or stretching indoors.';
   } else if (isModerate && !trend.hasGoodOrSatisfactoryWindow) {
-    exerciseAction = hasVulnerable
+    action = hasVulnerable
       ? 'Keep outdoor exercise indoors for children, elderly, and respiratory-sensitive members'
       : 'Reduce intensity and duration if exercising outdoors; prefer indoor workouts';
-    exerciseWhen = trend.bestHourLabel
+    when = trend.bestHourLabel
       ? `Lowest model-estimated hour: ${trend.bestHourLabel} (~${trend.bestHourAqi} AQI), or stay indoors`
       : 'Prefer indoor exercise today';
-    exerciseWhy = `Moderate AQI (${currentAqi ?? '101–200'}) does not drop into Good/Satisfactory in the 24h model forecast. Official Indian AQI guidance advises reducing prolonged or strenuous outdoor exertion.`;
-    exerciseAlternative = 'Swap high-intensity running for a shorter low-exertion walk or indoor workout.';
+    why = `Moderate AQI (${currentAqi ?? '101–200'}) does not drop into Good/Satisfactory in the 24h model forecast. Official Indian AQI guidance advises reducing prolonged or strenuous outdoor exertion.`;
+    alternative = 'Swap high-intensity running for a shorter low-exertion walk or indoor workout.';
   } else if (trend.hasGoodOrSatisfactoryWindow && trend.cleanWindowRange) {
-    exerciseAction =
+    action =
       hasVulnerable && !isGoodOrSatisfactory
         ? `Light outdoor activity only during ${trend.cleanWindowRange}; monitor for any discomfort`
         : `Best model-estimated outdoor window: ${trend.cleanWindowRange}`;
-    exerciseWhen = `${trend.cleanWindowRange} (model est. ≤100 AQI; lowest near ${trend.bestHourLabel ?? 'window'} at ~${trend.bestHourAqi})`;
-    exerciseWhy = isGoodOrSatisfactory
+    when = `${trend.cleanWindowRange} (model est. ≤100 AQI; lowest near ${trend.bestHourLabel ?? 'window'} at ~${trend.bestHourAqi})`;
+    why = isGoodOrSatisfactory
       ? `Air quality is ${category} (${currentAqi} est. AQI), generally suitable for normal outdoor activity subject to individual sensitivity.`
       : `Although current AQI is ${category}, the hourly model indicates a contiguous lower-pollution window (${trend.cleanWindowRange}) before levels rise toward ~${trend.worstHourAqi}.`;
-    exerciseAlternative = 'Move indoors immediately if local haze, smoke, or breathing discomfort occurs.';
+    alternative = 'Move indoors immediately if local haze, smoke, or breathing discomfort occurs.';
   } else {
-    exerciseAction = 'Normal outdoor activity is generally suitable; listen to your body';
-    exerciseWhen = 'Flexible based on hourly comfort';
-    exerciseWhy = `Air quality is ${category} (${currentAqi ?? '--'} est. AQI), within Good/Satisfactory Indian AQI guidance.`;
-    exerciseAlternative = 'Choose green spaces away from busy roads for cleaner breathing.';
+    action = 'Normal outdoor activity is generally suitable; listen to your body';
+    when = 'Flexible based on hourly comfort';
+    why = `Air quality is ${category} (${currentAqi ?? '--'} est. AQI), within Good/Satisfactory Indian AQI guidance.`;
+    alternative = 'Choose green spaces away from busy roads for cleaner breathing.';
   }
 
-  const exerciseItem: DailyRoutineItem = {
+  return {
     timeOfDay: 'outdoor-exercise',
     timeLabel: 'Outdoor Exercise Window',
     icon: '🏃',
-    action: exerciseAction,
-    when: exerciseWhen,
-    why: exerciseWhy,
+    action,
+    when,
+    why,
     howItHelps:
       'Matching exertion to actual hourly AQI levels prevents inhaling excess fine particulates during high-ventilation exercise.',
-    alternative: exerciseAlternative,
+    alternative,
     completed: false,
   };
+}
 
-  // 4. Afternoon errands
+function buildAfternoonRoutine(ctx: RoutineContext): DailyRoutineItem {
+  const { trend, currentAqi, isPoorOrWorse } = ctx;
+  const morningBucket = trend.bucketAverages.morning;
   const afternoonBucket = trend.bucketAverages.afternoon;
   const afternoonCleanerThanMorning =
     afternoonBucket !== null && morningBucket !== null && afternoonBucket < morningBucket - 15;
 
-  const afternoonItem: DailyRoutineItem = {
+  let action: string;
+  if (afternoonCleanerThanMorning && afternoonBucket !== null && afternoonBucket <= 150) {
+    action = 'Batch errands in the afternoon when model AQI is lower than morning; combine trips';
+  } else if (isPoorOrWorse) {
+    action = 'Postpone non-essential outdoor errands or consolidate into one low-exposure trip';
+  } else {
+    action = 'Combine errands into a single planned trip to minimize road time';
+  }
+
+  return {
     timeOfDay: 'afternoon',
     timeLabel: 'Afternoon Errands (10:00–16:00)',
     icon: '🛒',
-    action:
-      afternoonCleanerThanMorning && afternoonBucket! <= 150
-        ? 'Batch errands in the afternoon when model AQI is lower than morning; combine trips'
-        : isPoorOrWorse
-        ? 'Postpone non-essential outdoor errands or consolidate into one low-exposure trip'
-        : 'Combine errands into a single planned trip to minimize road time',
-    when: `10:00–16:00 · ${bucketText(afternoonBucket)}`,
+    action,
+    when: `10:00–16:00 · ${formatBucketText(afternoonBucket)}`,
     why: afternoonCleanerThanMorning
       ? `Hourly model estimates drop to ~${afternoonBucket} AQI in the afternoon compared to ~${morningBucket} in the morning due to daytime atmospheric mixing.`
       : isPoorOrWorse
@@ -364,22 +399,29 @@ export function generateDynamicDailyPlan(params: {
     alternative: 'Use shared errands, walking for very short trips when AQI ≤ 100, or consolidated deliveries.',
     completed: false,
   };
+}
 
-  // 5. Evening activities
+function buildEveningRoutine(ctx: RoutineContext): DailyRoutineItem {
+  const { trend, category, currentAqi, hasVulnerable, isModerate, isPoorOrWorse } = ctx;
   const eveningBucket = trend.bucketAverages.evening;
   const eveningElevated =
     (eveningBucket !== null && eveningBucket > 100) || isPoorOrWorse || (isModerate && hasVulnerable);
 
-  const eveningItem: DailyRoutineItem = {
+  let action: string;
+  if (eveningElevated) {
+    action = hasVulnerable
+      ? 'Keep children, elderly, and sensitive members indoors during evening hours'
+      : 'Prefer indoor evening activities and avoid lingering near busy roads';
+  } else {
+    action = 'Outdoor evening activities are generally suitable; prefer parks away from arterial traffic';
+  }
+
+  return {
     timeOfDay: 'evening',
     timeLabel: 'Evening Activities (16:00–21:00)',
     icon: '🌆',
-    action: eveningElevated
-      ? hasVulnerable
-        ? 'Keep children, elderly, and sensitive members indoors during evening hours'
-        : 'Prefer indoor evening activities and avoid lingering near busy roads'
-      : 'Outdoor evening activities are generally suitable; prefer parks away from arterial traffic',
-    when: `16:00–21:00 · ${bucketText(eveningBucket)}`,
+    action,
+    when: `16:00–21:00 · ${formatBucketText(eveningBucket)}`,
     why:
       eveningBucket !== null && eveningBucket > 100
         ? `Evening model estimates are ~${eveningBucket} AQI. Combined with evening traffic, roadside exposure rises sharply.`
@@ -391,19 +433,21 @@ export function generateDynamicDailyPlan(params: {
     alternative: 'Plan indoor family games, reading, or calm indoor recreation.',
     completed: false,
   };
+}
 
-  // 6. Nighttime indoor routine
+function buildNightRoutine(ctx: RoutineContext): DailyRoutineItem {
+  const { trend, preferences, isPoorOrWorse } = ctx;
   const nightBucket = trend.bucketAverages.night;
   const nightClean = nightBucket !== null && nightBucket <= 100 && !isPoorOrWorse;
 
-  const nightItem: DailyRoutineItem = {
+  return {
     timeOfDay: 'night',
     timeLabel: 'Nighttime Indoor Routine (21:00+)',
     icon: '🌙',
     action: nightClean
       ? 'Briefly ventilate sleeping areas if outdoor air feels clean, then keep indoor dust sources low'
       : 'Keep bedroom windows sealed, avoid indoor smoke/incense, and run HEPA filtration if available',
-    when: `21:00 onwards · ${bucketText(nightBucket)}`,
+    when: `21:00 onwards · ${formatBucketText(nightBucket)}`,
     why: nightClean
       ? `Nighttime hourly model estimates are ~${nightBucket} AQI (≤100), making brief ventilation reasonable unless local smoke is present.`
       : `Nighttime estimates remain ${nightBucket !== null ? `~${nightBucket} AQI` : 'uncertain/elevated'}. Overnight cooling often traps pollutants near ground level rather than clearing them.`,
@@ -414,6 +458,54 @@ export function generateDynamicDailyPlan(params: {
       : 'Use damp wiping before bed, seal obvious window gaps, and avoid burning incense or mosquito coils indoors.',
     completed: false,
   };
+}
 
-  return [morningItem, commuteItem, exerciseItem, afternoonItem, eveningItem, nightItem];
+/**
+ * Generates a 6-part daily routine tailored to current estimated AQI, contiguous hourly model trends,
+ * and household protection preferences without static time-of-day bias.
+ */
+export function generateDynamicDailyPlan(params: {
+  aqi: AQIInfo | null;
+  pollutants?: Pollutants;
+  hourly: HourlyDataPoint[];
+  preferences: UserPreferences;
+}): DailyRoutineItem[] {
+  const { aqi, pollutants, hourly, preferences } = params;
+  const trend = summarizeHourlyTrend(hourly);
+  const category: AQICategory = aqi?.category ?? 'Unknown';
+  const currentAqi = aqi?.value ?? null;
+
+  const hasVulnerable =
+    preferences.familyMembers.includes('children') ||
+    preferences.familyMembers.includes('elderly') ||
+    preferences.familyMembers.includes('respiratory');
+
+  const isGoodOrSatisfactory = category === 'Good' || category === 'Satisfactory';
+  const isModerate = category === 'Moderate';
+  const isPoorOrWorse =
+    category === 'Poor' || category === 'Very Poor' || category === 'Severe' || category === 'Hazardous';
+  const isVeryPoorOrSevere =
+    category === 'Very Poor' || category === 'Severe' || category === 'Hazardous';
+
+  const ctx: RoutineContext = {
+    trend,
+    category,
+    currentAqi,
+    pollutants,
+    preferences,
+    hasVulnerable,
+    isGoodOrSatisfactory,
+    isModerate,
+    isPoorOrWorse,
+    isVeryPoorOrSevere,
+  };
+
+  return [
+    buildMorningRoutine(ctx),
+    buildCommuteRoutine(ctx),
+    buildExerciseRoutine(ctx),
+    buildAfternoonRoutine(ctx),
+    buildEveningRoutine(ctx),
+    buildNightRoutine(ctx),
+  ];
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useSyncExternalStore } from 'react';
+import React, { createContext, useContext, useSyncExternalStore, useCallback, useMemo } from 'react';
 import type { UserPreferences } from '@/types';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from '@/lib/preferences';
 
@@ -48,16 +48,21 @@ function getServerSnapshot(): UserPreferences {
 export function PreferencesProvider({ children }: { children: React.ReactNode }) {
   const preferences = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  const updatePreferences = (updates: Partial<UserPreferences>) => {
+  const updatePreferences = useCallback((updates: Partial<UserPreferences>) => {
     const next = { ...getSnapshot(), ...updates };
     savePreferences(next);
     cachedRaw = JSON.stringify(next);
     cachedPrefs = next;
     listeners.forEach((l) => l());
-  };
+  }, []);
+
+  const contextValue = useMemo(
+    () => ({ preferences, updatePreferences }),
+    [preferences, updatePreferences]
+  );
 
   return (
-    <PreferencesContext.Provider value={{ preferences, updatePreferences }}>
+    <PreferencesContext.Provider value={contextValue}>
       {children}
     </PreferencesContext.Provider>
   );

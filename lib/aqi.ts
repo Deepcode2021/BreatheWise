@@ -74,6 +74,9 @@ const CPCB_BREAKPOINTS: Array<{
   },
 ];
 
+/**
+ * Maps a numeric Indian CPCB AQI value (0-500) to its official category, color palette, and health implication.
+ */
 export function getCPCBCategory(aqi: number, metadata?: Partial<AQIInfo>): AQIInfo {
   const clamped = Math.max(0, Math.min(500, Math.round(aqi)));
   const bp =
@@ -289,6 +292,7 @@ export function calculateCPCBAQIFromWindows(
   };
   const subIndices: Partial<Record<PollutantKey, number>> = {};
   const validPollutants: PollutantKey[] = [];
+  let hasPM = false;
 
   for (const key of keys) {
     const rule = POLLUTANT_AVERAGING_RULES[key];
@@ -319,10 +323,12 @@ export function calculateCPCBAQIFromWindows(
     if (subIdx !== null) {
       subIndices[key] = subIdx;
       validPollutants.push(key);
+      if (key === 'pm25' || key === 'pm10') {
+        hasPM = true;
+      }
     }
   }
 
-  const hasPM = validPollutants.includes('pm25') || validPollutants.includes('pm10');
   const meetsMinimumCount = validPollutants.length >= 3;
 
   if (!meetsMinimumCount || !hasPM) {
@@ -414,8 +420,8 @@ export function calculateCPCBAQI(
   let maxVal = -1;
   let dominantPollutant: PollutantKey | undefined;
   for (const key of validKeys) {
-    const val = subIndices[key]!;
-    if (val > maxVal) {
+    const val = subIndices[key];
+    if (val !== undefined && val > maxVal) {
       maxVal = val;
       dominantPollutant = key;
     }
@@ -429,6 +435,9 @@ export function calculateCPCBAQI(
   });
 }
 
+/**
+ * Returns the canonical hex badge color associated with an Indian CPCB AQI category.
+ */
 export function getAQICategoryColor(category: AQICategory): string {
   const map: Record<AQICategory, string> = {
     Good: '#00C853',
@@ -466,6 +475,9 @@ export function getPollutantStatus(
   return 'above_benchmark';
 }
 
+/**
+ * Formats an internal AQIScale identifier into a human-readable methodology string.
+ */
 export function formatAQIScale(scale: AQIScale): string {
   const labels: Record<AQIScale, string> = {
     India_CPCB: CPCB_METHODOLOGY_LABEL,

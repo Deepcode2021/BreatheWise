@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, type Content } from '@google/genai';
 import { fetchOpenMeteoAirQuality } from '@/lib/openMeteo';
 import { summarizeHourlyTrend } from '@/lib/dailyPlan';
+import { checkRateLimit, getClientIdentifier } from '@/lib/rateLimit';
 import {
   AI_RESPONSE_SCHEMA,
   BREATHEWISE_SYSTEM_INSTRUCTION,
@@ -21,6 +22,9 @@ import {
 } from '@/lib/assistant';
 import type { AIResponse } from '@/types';
 
+const MAX_REQUEST_BODY_BYTES = 32_768;
+const OPEN_METEO_CONTEXT_TIMEOUT_MS = 5000;
+
 async function resolveAuthoritativeContext(
   clientContext: AssistantContextInput
 ): Promise<AssistantContextInput> {
@@ -31,6 +35,7 @@ async function resolveAuthoritativeContext(
     return clientContext;
   }
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const serverFetchPromise = fetchOpenMeteoAirQuality({
       name: clientContext.location?.name ?? 'Selected Location',
@@ -39,9 +44,12 @@ async function resolveAuthoritativeContext(
       coordinates: coords,
     });
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Open-Meteo context timeout')), 5000)
-    );
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('Open-Meteo context timeout')),
+        OPEN_METEO_CONTEXT_TIMEOUT_MS
+      );
+    });
 
     const { data, forecast } = await Promise.race([serverFetchPromise, timeoutPromise]);
     const hourlySummary = summarizeHourlyTrend(forecast.hourly);
@@ -62,7 +70,7 @@ async function resolveAuthoritativeContext(
       aqiUnavailableReason: data.aqiAvailability?.reason,
       pollutants: { ...data.pollutants },
       instantPollutants: data.instantPollutants ? { ...data.instantPollutants } : undefined,
-      hourlySummary: hourlySummary as unknown as Record<string, unknown>,
+      hourlySummary,
       hourlyForecast,
       weather: { ...data.weather },
       timestamp: data.timestamp,
@@ -76,9 +84,15 @@ async function resolveAuthoritativeContext(
         ? `${clientContext.dataSource} (client snapshot; server re-fetch unavailable)`
         : 'Client-supplied snapshot (server environmental fetch unavailable)',
     };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
+/**
+ * Generates structured environmental AI guidance via `@google/genai` using server-side credentials,
+ * authoritative Open-Meteo context hydration, bounded payload validation, and sliding-window rate limiting.
+ */
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
@@ -88,9 +102,44 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const clientId = getClientIdentifier(request.headers);
+  const limit = checkRateLimit(clientId, { windowMs: 60_000, maxRequests: 20 });
+  if (!limit.allowed) {
+    const rateFallback: AIResponse = {
+      summary: 'Too many requests in a short window. Please wait a moment and try again.',
+      dataLimitations: 'Rate limit enforced to protect server-side AI quota.',
+    };
+    return NextResponse.json(
+      { response: rateFallback, error: 'Too many AI requests. Please wait before retrying.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(limit.retryAfterSeconds) },
+      }
+    );
+  }
+
+  const contentLengthHeader = request.headers.get('content-length');
+  if (contentLengthHeader) {
+    const declaredBytes = Number.parseInt(contentLengthHeader, 10);
+    if (Number.isFinite(declaredBytes) && declaredBytes > MAX_REQUEST_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request payload too large' }, { status: 413 });
+    }
+  }
+
+  let rawBodyText: string;
+  try {
+    rawBodyText = await request.text();
+  } catch {
+    return NextResponse.json({ error: 'Unable to read request body' }, { status: 400 });
+  }
+
+  if (rawBodyText.length > MAX_REQUEST_BODY_BYTES) {
+    return NextResponse.json({ error: 'Request payload too large' }, { status: 413 });
+  }
+
   let rawBody: unknown;
   try {
-    rawBody = await request.json();
+    rawBody = JSON.parse(rawBodyText);
   } catch {
     return NextResponse.json({ error: 'Invalid JSON request body' }, { status: 400 });
   }
@@ -171,7 +220,7 @@ export async function POST(request: NextRequest) {
 
     const rawText = response.text ?? '';
     const jsonPayload = extractJsonObject(rawText);
-    const parsed = JSON.parse(jsonPayload);
+    const parsed: unknown = JSON.parse(jsonPayload);
     const validated: AIResponse = validateAIResponse(parsed);
 
     return NextResponse.json({

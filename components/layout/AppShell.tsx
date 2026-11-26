@@ -17,6 +17,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <PreferencesProvider>
       <AirQualityProvider>
         <div className="flex h-screen overflow-hidden animated-bg">
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2 focus:rounded-xl focus:bg-teal-500 focus:text-slate-950 focus:text-sm focus:font-semibold focus:shadow-lg"
+          >
+            Skip to main content
+          </a>
+
           {/* Desktop Sidebar */}
           <Sidebar className="hidden md:flex" />
 
@@ -39,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Main Content */}
           <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
             <TopBar onMenuClick={toggleSidebar} />
-            <main className="flex-1 overflow-y-auto">
+            <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
                 {children}
               </div>
