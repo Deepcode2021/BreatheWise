@@ -13,6 +13,9 @@ export const metadata: Metadata = {
     description: 'AI-powered urban air quality assistant for families',
     type: 'website',
   },
+  verification: {
+    google: "FR1fFH6GlS8cEw4jXnj67sC6d-obQeuYDd06I7ehioA",
+  },
 };
 
 export const viewport: Viewport = {
